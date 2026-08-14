@@ -5540,10 +5540,4 @@ specification and do not override a numbered protocol requirement.
 | [SIMD repository](https://github.com/solana-foundation/solana-improvement-documents/tree/3b02766490b408294bb21a8da2ac30ccb30269e2) | `3b02766490b408294bb21a8da2ac30ccb30269e2` | Proposal text, activation intent, and feature identifiers linked from Appendix C |
 | [Legacy Solana](https://github.com/solana-labs/solana/tree/cca16a815dbc41c806d198ffdd2943e3c38c6a75) | `cca16a815dbc41c806d198ffdd2943e3c38c6a75` | Historical protocol-program and wire behavior still active in `E` |
 | [Stake Core-BPF program](https://github.com/solana-program/stake/tree/8f81ee29c7688c8a9c4a7a2c68b5f349b9cbb144) | `8f81ee29c7688c8a9c4a7a2c68b5f349b9cbb144` | Stake Program v5 executable behavior and interface research |
-
-[RFC 9669](https://www.rfc-editor.org/rfc/rfc9669.html) was comparative standards
-evidence only. Section 12.8, not the RFC or a GitHub repository, is the normative SBF
-definition for this specification.
-
-Where a protocol program is deployed as Core BPF, the authenticated Program and
-ProgramData accounts in the replayed bank supply its executable bytes.
+| [RFC 9669](https://www.rfc-editor.org/rfc/rfc9669.html) | N/A | Base BPF instruction-set semantics, subject to the SBF modifications in Section 12.8 |
