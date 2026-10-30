@@ -1,6 +1,6 @@
 # Solana Protocol Specification
 
-Mainnet reference epoch: `E = 1015`
+Mainnet reference epoch: `E = 1072`
 
 ## Table of contents
 
@@ -18,7 +18,7 @@ Mainnet reference epoch: `E = 1015`
 12. [SVM, loaders, syscalls, and precompiles](#12-svm-loaders-syscalls-and-precompiles)
 13. [Protocol-owned programs and sysvars](#13-protocol-owned-programs-and-sysvars)
 14. [Consensus hashes and commitments](#14-consensus-hashes-and-commitments)
-15. [Consensus voting, fork choice, and finality](#15-consensus-voting-fork-choice-and-finality)
+15. [Consensus, voting, and finality](#15-consensus-voting-and-finality)
 16. [Epochs, leader schedule, stake, fees, and rewards](#16-epochs-leader-schedule-stake-fees-and-rewards)
 17. [Feature activation, versioning, and hard forks](#17-feature-activation-versioning-and-hard-forks)
 18. [Security and adversarial considerations](#18-security-and-adversarial-considerations)
@@ -36,7 +36,7 @@ Appendices:
 
 | Epoch for feature activation | SIMD links | Change description |
 |---:|---|---|
-| `1015` | [Feature-linked SIMDs](#appendix-c--mainnet-feature-manifest) | First draft of the forward protocol configuration active in Mainnet epoch `E`, including the byte-exact inflation and epoch-reward transition. |
+| `1072` | [SIMD-0326](https://github.com/solana-foundation/solana-improvement-documents/blob/4f80d8a6938f86b9394e792253a2a52e01346314/proposals/0326-alpenglow.md), [SIMD-0385](https://github.com/solana-foundation/solana-improvement-documents/blob/4f80d8a6938f86b9394e792253a2a52e01346314/proposals/0385-transaction-v1.md), [SIMD-0391](https://github.com/solana-foundation/solana-improvement-documents/blob/4f80d8a6938f86b9394e792253a2a52e01346314/proposals/0391-replace-stake-program-floating-point.md), [SIMD-0525](https://github.com/solana-foundation/solana-improvement-documents/blob/4f80d8a6938f86b9394e792253a2a52e01346314/proposals/0525-reduce-slot-times.md) | Mainnet configuration with Alpenglow consensus, 200 ms slots, transaction v1, Stake Program v5.1 fixed-point stake arithmetic, current rent, and the current commission collectors. |
 
 # 1. Scope and conformance
 
@@ -94,8 +94,8 @@ layouts, snapshot archive compression, bootstrap convenience flows, operating-sy
 configuration, hardware sizing, performance tuning, peer-scoring heuristics,
 transaction-selection policy, and arbitrary application-program semantics are outside
 scope except when a specific rule demonstrably changes protocol interoperability,
-validity, deterministic state, a consensus commitment, voting, fork choice, finality, or
-necessary liveness.
+validity, deterministic state, a consensus commitment, voting, consensus selection,
+finality, or necessary liveness.
 
 # 2. Normative language and conventions
 
@@ -151,13 +151,13 @@ the SIMDs in Appendix C do not silently extend the numbered requirements.
 | block | The ordered entries and transactions reconstructed for one slot and accepted under Chapter 10. |
 | candidate block | Reconstructed slot content before all validity and state-transition checks pass. |
 | commitment | A consensus-visible hash or identifier catalogued in Chapter 14. |
-| bank hash | The Chapter 14 commitment to one frozen bank; together with its slot it is the vote and fork-choice identity. |
+| bank hash | The Chapter 14 commitment to one frozen bank and the value checked by the Alpenglow block footer; Alpenglow votes identify a block by its block ID, not by this hash. |
 | terminal FEC root | The full 32-byte Merkle root of a slot's final FEC set; it binds shred-chain and repair data but is not a bank hash. |
 | entry | A PoH-linked record containing zero or more ordered transactions. |
 | feature | An on-chain Feature Gate account whose decoded activation state selects a protocol rule. |
 | finalized | The commitment/finality condition defined by Chapter 15, not an RPC label by itself. |
 | fork | A parent-linked sequence of slot states sharing an ancestor. |
-| reference epoch `E` | Mainnet epoch 1015, whose feature state determines this specification's protocol configuration. |
+| reference epoch `E` | Mainnet epoch 1072, whose feature state determines this specification's protocol configuration. |
 | root | A locally persisted/pruned consensus anchor advanced only by the active consensus rules. |
 | shred | A signed data or coding unit used to disseminate and reconstruct slot payload. |
 | slot | A `u64` position in the ledger schedule. A skipped slot has no accepted block. |
@@ -174,18 +174,31 @@ transition, freezes commitments, and exposes the resulting bank state to consens
 
 **Informative diagram.**
 
-```mermaid
-flowchart LR
-    P[Packets] --> A[Authenticated messages and shreds]
-    A --> R[Reconstruction]
-    R --> C[Candidate block]
-    S[Parent state] --> B[ApplyBlock]
-    G[Protocol configuration] --> B
-    C --> B
-    B --> O[Results, post-state, and commitments]
-    O --> V[Vote eligibility]
-    V --> F[Fork choice]
-    F --> T[Root and finality]
+```plantuml
+@startuml
+left to right direction
+rectangle Packets as P
+rectangle "Authenticated messages\nand shreds" as A
+rectangle Reconstruction as R
+rectangle "Candidate block" as C
+rectangle "Parent state" as S
+rectangle "Protocol configuration" as G
+rectangle ApplyBlock as B
+rectangle "Results, post-state,\nand commitments" as O
+rectangle "Vote eligibility" as V
+rectangle "Consensus selection" as F
+rectangle "Root and finality" as T
+P --> A
+A --> R
+R --> C
+S --> B
+G --> B
+C --> B
+B --> O
+O --> V
+V --> F
+F --> T
+@enduml
 ```
 
 ## 3.3 Determinism boundary
@@ -198,12 +211,12 @@ Determinism applies at four different boundaries:
 |---|---|
 | Pure transition | Equal parent bank, ordered block, and protocol configuration produce the same transaction outcomes, post-state, and commitments. |
 | Network observation | Peers may observe different valid messages and arrival orders; an observation-dependent rule must state which authenticated observation set it consumes. |
-| Local safety state | Tower contents and roots depend on the participant's own prior safe votes, but the update and voting rules are deterministic for equal local safety state and equal observations. |
+| Local safety state | Persisted Alpenglow vote history depends on the participant's own prior votes, but the update and voting rules are deterministic for equal local safety state and equal observations. |
 | Local policy | Peer choice, retry timing, packet queues, transaction selection, resource scheduling, and storage strategy may vary and do not define protocol validity. |
 
 Accepted byte domains, ordered block content, committed account state,
-capitalization, consensus hashes, stake weight, leader assignment, fork weight for a
-given observation set, safe votes for a given tower, roots, and finality may not vary
+capitalization, consensus hashes, stake weight, leader assignment, consensus selection
+for a given observation set, safe Alpenglow votes, roots, and finality may not vary
 for equal applicable protocol inputs. Storage layout, execution strategy, and local
 retention policy do not enter any commitment.
 
@@ -267,21 +280,22 @@ deletion regardless of its transient data, owner, or executable fields.
 
 **Informative diagram.**
 
-```mermaid
-stateDiagram-v2
-    [*] --> Absent
-    Absent --> Present: allocate or credit
-    Present --> Present: authorized mutation
-    Present --> Executable: loader finalizes program
-    Executable --> Executable: authorized upgrade
-    Present --> Absent: zero lamports and reclaim
-    Executable --> Absent: loader closes program
+```plantuml
+@startuml
+[*] --> Absent
+Absent --> Present : allocate or credit
+Present --> Present : authorized mutation
+Present --> Executable : loader finalizes program
+Executable --> Executable : authorized upgrade
+Present --> Absent : zero lamports and reclaim
+Executable --> Absent : loader closes program
+@enduml
 ```
 
 [SOL-ACC-0006] Creation, allocation, assignment, executable transition, truncation, and
 closure **MUST** occur only through the protocol-program rule authorizing that
 transition. A committed account with zero lamports **MUST** be removed from the logical
-account map before the next transaction is loaded; merely writing a field-shaped byte
+account map before the next transaction is loaded; just writing a field-shaped byte
 sequence does not create protocol state.
 
 ## 4.4 Bank metadata
@@ -343,16 +357,18 @@ consume bytes. Their enclosing section remains authoritative.
 | `FIXINT-LE` | Primitive fields and containers in an enclosing codec that explicitly selects canonical fixed-integer serialization | This section's primitive table plus the enclosing field table. Counts are `u64`; enum tags are `u32`; no padding is implicit. |
 | `SHORT-U16` | Transaction counts, instruction counts and explicitly named compact sequences | Section 5.4 only. |
 | `ULEB128` | ContactInfo version, wallclock, and other explicitly named unsigned compact fields wider than `ShortU16` | Section 5.4. The declared integer width bounds the group count; overflow and nonminimal final zero groups are rejected. |
-| `CRDS-E1015` | Gossip datagrams, `CrdsValue`, ContactInfo and nested CRDS types | Sections 6.2–6.5. This is a closed schema composing `FIXINT-LE`, `SHORT-U16`, and `ULEB128`; zero-byte deprecated variants and field-specific bounds are exactly as stated there. |
-| `REPAIR-E1015` | Repair requests, ordinary shred responses, repair ping challenges, and ancestor-hash responses | Section 6.7. Requests and specialized responses use their stated discriminants and fields; an ordinary response is one `SHRED-E1015` followed by a `u32` nonce. |
-| `TX-E1015` | Legacy and version-0 transactions and messages | Sections 7.1–7.4; it composes `SHORT-U16` and fixed byte arrays and has no general-purpose struct serializer. |
-| `ENTRY-E1015` | Deshredded ledger components and Entries | Sections 8.3 and 9.6. |
-| `SHRED-E1015` | Raw Turbine shreds and shreds embedded in repair responses | Sections 9.1–9.5 and 14.6. This is a fixed-offset, variant-dependent format with exact lengths, padding, Merkle coverage, and Reed–Solomon regions; it is not a general-purpose struct serialization. |
-| `SBF-ELF-E1015` | Deployed SBF ELF objects and their eight-byte instruction words | Sections 12.8.1, 12.8.3, and 12.8.5. ELF acceptance and instruction decoding depend on the selected active SBF version. |
-| `SBF-ABI-E1015` | Loader ABI-v0 and ABI-v1 program inputs and outputs, plus syscall guest-memory structures | Sections 12.8.6–12.8.7. The loader selects v0 or v1; syscall structures use their exact field order, widths, padding, alignment, and access rules. |
-| `PRECOMPILE-E1015` | Ed25519, secp256k1, and secp256r1 signature-verification instruction data | Section 12.6. Prefixes, offset records, referenced byte ranges, and program-specific key and signature encodings are exact. |
-| `PROGRAM-E1015` | Compute Budget, System, Vote, Stake, Config, Feature, ALT, loader, and ZK ElGamal instructions and account states | Sections 7.6, 13.3, and 17.1. Each program's byte tables control; `FIXINT-LE` applies only where explicitly selected, and bespoke one-byte and POD layouts remain bespoke. |
-| `SYSVAR-E1015` | Persistent sysvar account data and the synthesized Instructions sysvar | Sections 13.4 and 13.6. Persistent sysvars compose `FIXINT-LE` where stated; the Instructions sysvar uses its own `u16`-offset framing. |
+| `CRDS-E1072` | Gossip datagrams, `CrdsValue`, ContactInfo and nested CRDS types | Sections 6.2–6.5. This is a closed schema composing `FIXINT-LE`, `SHORT-U16`, and `ULEB128`; zero-byte deprecated variants and field-specific bounds are exactly as stated there. |
+| `REPAIR-E1072` | Repair requests, ordinary shred responses, repair ping challenges, ancestor-hash responses, and block-ID repair | Section 6.7. Requests and specialized responses use their stated discriminants and fields; an ordinary response is one `SHRED-E1072` followed by a `u32` nonce. |
+| `ALPENGLOW-WIRE-E1072` | Alpenglow votes and certificates carried in QUIC datagrams | Sections 6.6 and 15.2. The codec is the exact Wincode subset stated there, including explicit enum tags and length encodings. |
+| `ALPENGLOW-STATE-E1072` | Epoch inflation account state used by Alpenglow vote rewards | Section 16.6.2. This is the exact fixed-integer Wincode record stated there, including the one-byte previous-state option tag. |
+| `TX-E1072` | Legacy, version-0, and version-1 transactions and messages | Sections 7.1–7.4. Legacy and v0 compose `SHORT-U16`; v1 uses its bespoke fixed-count layout and places signatures after the message. |
+| `ENTRY-E1072` | Deshredded ledger components, Alpenglow block markers, and Entries | Sections 8.3 and 9.6. |
+| `SHRED-E1072` | Raw Turbine shreds and shreds embedded in repair responses | Sections 9.1–9.5 and 14.6. This is a fixed-offset, variant-dependent format with exact lengths, padding, Merkle coverage, and Reed–Solomon regions; it is not a general-purpose struct serialization. |
+| `SBF-ELF-E1072` | Deployed SBF ELF objects and their eight-byte instruction words | Sections 12.8.1, 12.8.3, and 12.8.5. ELF acceptance and instruction decoding depend on the selected active SBF version. |
+| `SBF-ABI-E1072` | Loader ABI-v0 and ABI-v1 program inputs and outputs, plus syscall guest-memory structures | Sections 12.8.6–12.8.7. The loader selects v0 or v1; syscall structures use their exact field order, widths, padding, alignment, and access rules. |
+| `PRECOMPILE-E1072` | Ed25519, secp256k1, and secp256r1 signature-verification instruction data | Section 12.6. Prefixes, offset records, referenced byte ranges, and program-specific key and signature encodings are exact. |
+| `PROGRAM-E1072` | Compute Budget, System, Vote, Stake, Config, Feature, ALT, loader, and ZK ElGamal instructions and account states | Sections 7.6, 13.3, and 17.1. Each program's byte tables control; `FIXINT-LE` applies only where explicitly selected, and bespoke one-byte and POD layouts remain bespoke. |
+| `SYSVAR-E1072` | Persistent sysvar account data and the synthesized Instructions sysvar | Sections 13.4 and 13.6. Persistent sysvars compose `FIXINT-LE` where stated; the Instructions sysvar uses its own `u16`-offset framing. |
 
 [SOL-GEN-0006] A protocol object belonging to a registered surface **MUST** be encoded
 with the assigned enclosing codec and every nested codec it names. A receiver
@@ -780,7 +796,7 @@ the endpoint.
 | `10` | TVU UDP | active |
 | `11` | TVU QUIC | recognized but inactive |
 | `12` | TPU-vote QUIC | active |
-| `13` | Alpenglow UDP | recognized but inactive because Alpenglow is inactive in `E` |
+| `13` | Alpenglow votor QUIC | active; QUIC DATAGRAM consensus messages |
 
 [SOL-WIR-0013] A valid ContactInfo **MUST** contain only unique IPv4 addresses and
 unique socket keys, every socket index **MUST** be in range, and every address **MUST**
@@ -799,8 +815,10 @@ accept transaction application data through ContactInfo keys 5 or 6. A TPU-vote 
 datagram contains exactly one Chapter 7 transaction with no application framing. A TPU,
 TPU-forward, or TPU-vote QUIC connection **MUST** negotiate the ten-byte ALPN
 `solana-tpu`, and each completed requester-initiated unidirectional stream **MUST**
-contain exactly one transaction. In either active carriage the transaction is nonempty,
-consumes all bytes, and is at most 1,232 bytes.
+contain exactly one transaction. The stream is nonempty, consumes all bytes, and is at
+most 4,096 bytes. Chapter 7 then applies the format-specific transaction limit: 1,232
+bytes for legacy and version 0, or 4,096 bytes for version 1. The UDP form remains
+limited to 1,232 bytes by Section 6.1.
 
 [SOL-WIR-0016] A TPU receiver **MUST** pass only QUIC's ordered, reassembled bytes from
 one completed unidirectional stream to the transaction decoder. It **MUST** reject a
@@ -817,7 +835,7 @@ transaction; Chapter 7 signatures do.
 | Key exchange | X25519 |
 | TLS 1.3 cipher suites | accept AES-128-GCM-SHA256, AES-256-GCM-SHA384, and ChaCha20-Poly1305-SHA256 |
 | ALPN | exactly `solana-tpu` |
-| Per-stream receive window and application hard cap | `1,232` bytes |
+| Per-stream receive window and application hard cap | `4,096` bytes |
 | Connection receive window | `8,388,608` bytes |
 | Initial bidirectional-stream limit | `0` |
 | Initial unidirectional-stream limit | `0`, raised after handshake/QoS classification |
@@ -888,11 +906,12 @@ and dummy-certificate-signature validation as described above. A transport ident
 **MUST NOT** replace transaction signatures.
 
 [SOL-WIR-0018] A requester **MUST** finish each transaction stream. EOF after
-`1..=1,232` bytes delivers one packet; reset, stop, timeout, zero bytes, `1,233` bytes,
-a second transaction in the stream, or a transaction split between streams discards that
-stream without an application response. A responder **MAY** close or reset throttled
-streams or connections; the sender then retries by opening a new stream or connection
-and **MUST NOT** infer transaction acceptance from transport completion.
+`1..=4,096` bytes delivers one packet to the Chapter 7 decoder; reset, stop, timeout,
+zero bytes, `4,097` bytes, a second transaction in the stream, or a transaction split
+between streams discards that stream without an application response. A responder
+**MAY** close or reset throttled streams or connections; the sender then retries by
+opening a new stream or connection and **MUST NOT** infer transaction acceptance from
+transport completion.
 
 **Informative table. QUIC application close codes in the active liveness profile.**
 
@@ -907,6 +926,49 @@ Repair and TVU use UDP in epoch `E`; their recognized QUIC socket keys do not se
 this TPU ALPN or transaction stream grammar. TPU, TPU-forward, and TPU-vote QUIC differ
 only in advertised endpoint and downstream transaction classification. TPU-vote
 additionally accepts the UDP form above.
+
+### 6.6.1 Alpenglow votor QUIC datagrams
+
+The ContactInfo key-13 endpoint carries Alpenglow votes and certificates. This service
+is independent of TPU transaction ingestion.
+
+**Normative table. Alpenglow transport profile.**
+
+| Parameter | Active value |
+|---|---|
+| QUIC version | version 1 |
+| TLS version | TLS 1.3 |
+| TLS 1.3 cipher suites | AES-128-GCM-SHA256, AES-256-GCM-SHA384, and ChaCha20-Poly1305-SHA256 |
+| ALPN | ASCII `alpenglow-v1` |
+| application carriage | QUIC DATAGRAM only |
+| bidirectional and unidirectional streams | disabled; initial limits are zero |
+| path MTU | `1,280` bytes; path-MTU discovery disabled |
+| connection migration | disabled |
+| idle timeout | `5` seconds |
+| keepalive interval | `2` seconds |
+| 0-RTT | disabled |
+| peer identity | node-identity Ed25519 public key extracted from the mutually authenticated certificate |
+| peer admission | identity must belong to the admitted staked-node set for the relevant epoch window |
+| inbound connections per admitted peer | at most `2` |
+
+Certificate construction and acceptance use the identity-certificate rules in Section
+6.6. The TLS CertificateVerify signature binds possession of the advertised node
+identity. A certificate whose Ed25519 public key cannot be extracted, or whose identity
+is not in the admitted staked-node set, does not create an unstaked Alpenglow peer; the
+connection is rejected. Vote verification maps that node identity to its vote-account
+rank, effective stake, and BLS public key for the target slot's epoch.
+
+[SOL-WIR-0019] An Alpenglow endpoint **MUST** negotiate the transport profile above,
+**MUST NOT** accept consensus messages on a QUIC stream, and **MUST NOT** accept early
+data. It **MUST** discard a datagram that is truncated, has trailing bytes, has another
+shred version, has an unknown version or kind, or exceeds the negotiated datagram size.
+Transport receipt is not a vote: Chapter 15 signature, rank, and stake checks remain
+mandatory.
+
+The datagram payload uses the `ALPENGLOW-WIRE-E1072` codec in Section 15.2. QUIC
+connection counts, handshake-rate governors, send retry intervals, and queue capacities
+beyond the interoperability values above are local liveness policy rather than consensus
+or ledger validity rules.
 
 ## 6.7 Repair
 
@@ -934,7 +996,7 @@ begin with this signed header:
 | `10` | Orphan | `slot:u64` | 152 |
 | `11` | AncestorHashes | `slot:u64` | 152 |
 
-[SOL-WIR-0019] The signature for variants `8..=11` **MUST** verify under the header
+[SOL-WIR-0020] The signature for variants `8..=11` **MUST** verify under the header
 sender over `LE(discriminant,4) || bytes[68..end]`; the signature field itself is
 omitted. The recipient **MUST** be the receiving identity and the timestamp **MUST** be
 within 600,000 milliseconds of current Unix time.
@@ -950,7 +1012,7 @@ layout from Section 6.4, for a total of 132 bytes.
 | `AncestorHashesResponse::Hashes` | `LE(0,4)`, `u64` count, then at most 30 `(slot:u64,hash[32])` records |
 | `AncestorHashesResponse::Ping` | `LE(1,4)`, Ping `[128]` |
 
-[SOL-WIR-0020] A repair response **MUST** end in the outstanding request's nonce and
+[SOL-WIR-0021] A repair response **MUST** end in the outstanding request's nonce and
 match its request: WindowIndex requires the exact slot and index; HighestWindowIndex
 requires the exact slot and an index not below the request; Orphan permits at most 11
 responses with shred slot not above the request; AncestorHashes permits at most 30
@@ -958,11 +1020,11 @@ pairs. Every returned shred **MUST** pass Chapter 9 before use.
 
 ## 6.8 Turbine carriage
 
-[SOL-WIR-0021] A TVU UDP datagram **MUST** carry exactly one raw Chapter 9 shred without
+[SOL-WIR-0022] A TVU UDP datagram **MUST** carry exactly one raw Chapter 9 shred without
 an application header. Before reconstruction, the receiver **MUST** validate the shred's
 version, byte layout, Merkle proof, and leader signature.
 
-[SOL-WIR-0022] Forwarding **MUST NOT** alter bytes covered by the leader-signed Merkle
+[SOL-WIR-0023] Forwarding **MUST NOT** alter bytes covered by the leader-signed Merkle
 root. A retransmitter signature, when present in its Chapter 9 trailer, is carried
 unchanged by subsequent forwarding and does not replace leader authentication.
 
@@ -988,7 +1050,7 @@ first usable key-10 endpoint for each exact `(UDP,socket-address)` and only the 
 usable key-10 endpoint for each IP address. For a later duplicate, remove its endpoint:
 retain the identity if its stake is positive, but drop it when its stake is zero and it
 has no other active TVU endpoint. This address deduplication is part of the permutation
-input, not merely a send-time filter. The leader is removed. Give node `i` weight equal
+input, not just a send-time filter. The leader is removed. Give node `i` weight equal
 to its epoch stake in lamports. To sample from total positive weight `T`, set
 `zone=(T << leading_zeros(T))-1`; repeatedly draw RNG `x`, compute `p=x*T` as `u128`,
 `hi=p>>64`, `lo=p mod 2^64`, and accept `hi` when `lo<=zone`. Select the least index
@@ -1016,14 +1078,14 @@ parent(i):
     parent index = base if base == 0 else base + offset
 ```
 
-[SOL-WIR-0023] A leader **MUST** originate each valid shred to `P[0]`. A TVU participant
+[SOL-WIR-0024] A leader **MUST** originate each valid shred to `P[0]`. A TVU participant
 receiving a newly accepted broadcast shred **MUST** forward it to the available key-10
 UDP addresses at its child indices, in tree order, with at most 200 children and at most
 four hops. It **MUST NOT** retransmit a shred received as a repair response. Missing,
 stale, duplicate-IP, or invalid TVU addresses are skipped; repair under Section 6.7 is
 the fallback for the resulting holes.
 
-[SOL-WIR-0024] Turbine membership is evaluated from the participant's current
+[SOL-WIR-0025] Turbine membership is evaluated from the participant's current
 authenticated gossip view, so two participants may omit different unreachable addresses
 without changing shred or block validity. The stake weights, seed, ChaCha8 word stream,
 sampling rule, and index-to-child mapping **MUST NOT** be replaced by an
@@ -1033,9 +1095,9 @@ implementation-dependent shuffle.
 
 ## 7.1 Scope and notation
 
-This chapter specifies the two Mainnet message formats in epoch `E`: legacy and version
-0. It defines their envelopes, sanitation, address resolution, signature checks,
-   compute-budget interpretation, fee-payer validation, and account loading.
+This chapter specifies the three Mainnet message formats in epoch `E`: legacy, version
+0, and version 1. It defines their envelopes, sanitation, address resolution, signature
+checks, compute-budget interpretation, fee-payer validation, and account loading.
 
 Every `compact-u16` in this chapter is the single authoritative `ShortU16` codec in
 Section 5.4; this chapter does not define a second compact-integer encoding.
@@ -1050,7 +1112,7 @@ instruction, and creates no replay-cache entry.
 
 ## 7.2 Transaction envelope and message encodings
 
-The transaction envelope is:
+The legacy and version-0 transaction envelope is:
 
 **Normative table.**
 
@@ -1082,6 +1144,55 @@ signed message bytes.
 | 2 | legacy fields | every legacy field above, starting with its three-byte header |
 | 3 | `lookup_count` | canonical `compact-u16` |
 | 4 | `address_table_lookups` | `lookup_count` consecutive lookup records |
+
+Version 1 replaces the preceding envelope and vector codecs with a bounded layout. Its
+signatures follow the message rather than preceding it, and it does not carry a
+signature-count field. The header's `required_signature_count` determines their count.
+
+**Normative table. Version-1 transaction layout.**
+
+| Order | Field | Encoding / length |
+|---:|---|---|
+| 1 | version | one byte `0x81` |
+| 2 | header | three bytes in the header table below |
+| 3 | configuration mask | `u32` little-endian |
+| 4 | lifetime blockhash | 32 bytes |
+| 5 | instruction count | `u8` |
+| 6 | address count | `u8` |
+| 7 | static account keys | `address_count` consecutive 32-byte keys |
+| 8 | configuration values | fields selected by the mask, in increasing bit order |
+| 9 | instruction headers | `instruction_count` records, four bytes each |
+| 10 | instruction account indices | concatenated records in instruction order |
+| 11 | instruction data | concatenated records in instruction order |
+| 12 | signatures | `required_signature_count` consecutive 64-byte signatures |
+
+The signed message is every byte from the `0x81` version byte through the final byte of
+the concatenated instruction data. Signatures are not included in the signed message.
+
+**Normative table. Version-1 configuration mask.**
+
+| Bit | Field when set | Encoding | Absent value |
+|---:|---|---|---:|
+| `0` | priority-fee low word | `u32` little-endian | `0` |
+| `1` | priority-fee high word | `u32` little-endian | `0` |
+| `2` | compute-unit limit | `u32` little-endian | `0` compute units |
+| `3` | loaded-account-data limit | `u32` little-endian | `0` bytes |
+| `4` | heap-frame size | `u32` little-endian | `32,768` bytes |
+
+Bits 0 and 1 are one `u64` little-endian priority fee and **MUST** either both be set or
+both be clear. Bits 5 through 31 are invalid.
+
+**Normative table. Version-1 instruction header.**
+
+| Offset | Field | Encoding |
+|---:|---|---|
+| `0` | program-ID index | `u8` |
+| `1` | account-index count | `u8` |
+| `2` | instruction-data length | `u16` little-endian |
+
+For each instruction, the declared account indices occur in the shared account-index
+region and the declared data bytes occur in the shared data region. Both regions
+preserve instruction order.
 
 **Normative table.**
 
@@ -1116,12 +1227,26 @@ bytes, contain between 1 and 12 signatures inclusive, and have
 `signature_count == required_signature_count`.
 
 [SOL-TXN-0003] A decoder **MUST** interpret a message first byte with its high bit clear
-as the legacy header's `required_signature_count`, and **MUST** accept a high-bit-set
-first byte only when it is exactly `0x80`, denoting version 0.
+as the legacy header's `required_signature_count`. In the legacy/version-0 envelope it
+**MUST** accept a high-bit-set message byte only when it is `0x80`. An entire transaction
+whose first byte is `0x81` selects the version-1 grammar instead.
 
 [SOL-TXN-0004] A decoder **MUST** consume every byte of the transaction according to the
 selected grammar and **MUST** reject truncation, integer overflow, a vector extending
 past the envelope, or trailing bytes.
+
+[SOL-TXN-0035] A version-1 transaction **MUST** be at most `4,096` bytes, contain
+`1..=12` signatures, `1..=64` addresses, and at most `64` top-level instructions. Each
+instruction **MUST** reference at most `255` accounts, every account and program index
+**MUST** be less than the address count, the program index **MUST** be nonzero, and all
+account keys **MUST** be distinct. Version 1 **MUST NOT** contain address-table lookups.
+
+[SOL-TXN-0036] A version-1 heap request **MUST** be a multiple of `1,024` bytes in
+`[32,768,262,144]`. The decoder **MUST** reject an unknown configuration bit, only one
+priority-fee word, an overflowing concatenated region, or trailing bytes. Compute Budget
+program instructions remain executable successful no-ops for version-1 configuration;
+the header configuration is authoritative, and those instructions still incur their
+ordinary instruction and execution cost.
 
 ## 7.3 Header and account-key sanitation
 
@@ -1551,26 +1676,40 @@ supplied to an Entry.
 
 ## 8.4 Tick accounting
 
-The bank supplies `hashes_per_tick`, its current tick height, and its maximum tick
-height. In Mainnet epoch `E`, `hashes_per_tick = 62,500` and there are exactly 64 ticks
-per slot, so a child bank's maximum tick height is 64 greater than its parent's
-completed tick height.
+Alpenglow uses low-power PoH. An active bank has no `hashes_per_tick` target and a block
+contains one terminal tick, called the alpentick. Every Entry advances the hash chain by
+one hash regardless of whether it contains transactions. The alpentick is the only empty
+transaction Entry permitted as a tick and is the final ledger component after the
+footer.
 
-[SOL-POH-0008] When `hashes_per_tick` is nonzero, a verifier **MUST** add every Entry's
-`num_hashes` to a carried, saturating tick-hash counter; at each tick the counter
-**MUST** equal `hashes_per_tick` and then reset to zero, and after any processed segment
-it **MUST** remain less than `hashes_per_tick`.
+**Normative table. Epoch-`E` PoH and tick parameters.**
 
-[SOL-POH-0009] When `hashes_per_tick` is nonzero, a tick with `num_hashes == 0` **MUST**
-be rejected; when `hashes_per_tick` is zero, the tick-hash-count check **MUST** be
-disabled without disabling Entry hash-chain verification.
+| Parameter | Active value |
+|---|---:|
+| target slot duration | `200,000,000` nanoseconds |
+| `hashes_per_tick` | absent |
+| inherited bank tick-height interval | `64` ticks/slot |
+| initial tick height of a replayed Alpenglow bank | `max_tick_height - 1` |
+| tick Entries serialized in one block | exactly `1`, the terminal alpentick |
+| Entry `num_hashes` | exactly `1` |
 
-[SOL-POH-0010] The bank tick height plus reconstructed tick count **MUST NOT** exceed
-the bank maximum; a full slot **MUST** reach that maximum, and reaching the maximum
-**MUST** coincide with both a final tick Entry and the full-slot marker. The values of
-`hashes_per_tick` and ticks per slot are genesis/bank parameters; a validator **MUST**
-use the epoch-`E` Mainnet values above when replaying this specification and **MUST
-NOT** substitute a local default.
+The inherited 64-tick interval remains part of bank tick-height arithmetic. Alpenglow
+does not serialize 64 tick Entries: replay initializes the bank one tick below its
+maximum, and the single alpentick reaches that maximum.
+
+[SOL-POH-0008] Every Entry in an epoch-`E` block **MUST** have `num_hashes == 1` and
+**MUST** satisfy the sequential hash transition in Section 8.3. Absence of a
+`hashes_per_tick` target disables only the legacy accumulated-hash-count comparison; it
+does not disable Entry hashing.
+
+[SOL-POH-0009] A valid block **MUST** contain exactly one tick Entry. It **MUST** have
+an empty transaction vector, follow the BlockFooter component immediately, and be the
+last Entry and last component in the block. A transaction Entry, footer, marker, or
+additional tick after it is block-fatal.
+
+[SOL-POH-0010] Replay **MUST** increment the bank tick height exactly once for the
+terminal alpentick and require the resulting height to equal the bank maximum tick
+height. It **MUST NOT** synthesize legacy ticks or substitute a local PoH profile.
 
 # 9. Shreds, erasure coding, and block reconstruction
 
@@ -1639,8 +1778,8 @@ one **MUST** be divisible by 32.
 [SOL-SHD-0006] Except for `(slot,parent) == (0,0)`, a data-shred parent **MUST** equal
 `slot - parent_offset`, `parent_offset` **MUST** be nonzero, and the resulting parent
 **MUST** be less than the slot and not less than the receiver's rooted slot. In epoch
-`E`, both data- and coding-shred indices **MUST** be less than `32,768`; consequently a
-slot contains at most `1,024` 32+32 FEC sets.
+`E`, both data- and coding-shred indices **MUST** be less than `16,384`; consequently a
+slot contains at most `512` 32+32 FEC sets.
 
 ## 9.3 Payload and active variants
 
@@ -1758,8 +1897,8 @@ component or unconsumed bytes after a decoded entry batch **MUST** invalidate th
 candidate; padding outside each data shred's declared `size` never enters the deshredded
 component.
 
-Each DATA_COMPLETE component is independently framed as exactly one `ENTRY-E1015` outer
-sequence:
+An ordinary DATA_COMPLETE component is independently framed as exactly one
+`ENTRY-E1072` outer sequence:
 
 **Normative table. Deshredded component framing.**
 
@@ -1771,37 +1910,73 @@ sequence:
 
 The active fixed-FEC rule permits DATA_COMPLETE only on the final data shred of each
 32-data-shred FEC set; LAST_IN_SLOT implies DATA_COMPLETE. Therefore a slot has at most
-1,024 components, each component consists of whole Entry fields, and an Entry or
-transaction field cannot continue into another component. A component may contain
-multiple Entries but never multiple outer sequences.
+`512` components. Entry and transaction fields cannot continue into another component.
+The combined serialized Entry batches in a slot **MUST NOT** exceed `10,485,760` bytes.
 
-An eight-byte zero count is the reserved block-marker selector. BlockHeader,
-UpdateParent, BlockFooter, and GenesisCertificate marker schemas are structurally
-recognized by the codec, but Alpenglow and its marker-processing gate are inactive in
-`E`; consequently every zero-count component is block-invalid. No footer is required or
-permitted. Bytes or components after the unique LAST_IN_SLOT shred are outside the
-selected slot candidate and, if presented as part of that candidate, are an invalid
-extra-shred condition.
+An eight-byte zero count selects a block marker rather than an empty Entry batch. Every
+marker has the following exact preamble:
 
-[SOL-SHD-0018] A DATA_COMPLETE component **MUST** contain one and only one nonempty
-outer Entry sequence, consume its bytes exactly, and end only after a complete Entry and
-complete transaction. A receiver **MUST NOT** concatenate components to repair a
-truncated count, Entry, transaction, or instruction.
+**Normative table. Block-marker preamble.**
 
-[SOL-SHD-0019] Block markers and footers **MUST** be rejected in epoch `E` as the
-block-fatal protocol disposition `InvalidBlock::BlockComponentPreMigration`; an
-implementation **MUST NOT** interpret a zero count as a valid empty Entry sequence. The
-exact eight bytes `LE(0,8)` are `InvalidBlock::EmptyEntryBatch`. It **MUST** reject any
-data shred after LAST_IN_SLOT and any slot with more than 1,024 DATA_COMPLETE
-components.
+| Byte range | Field | Accepted value |
+|---|---|---|
+| `[0,8)` | Entry count | `LE(0,8)` |
+| `[8,10)` | marker version | `LE(1,2)` |
+| `[10,11)` | marker kind | `0` footer, `1` header, `2` update-parent, `3` genesis certificate |
+| `[11,13)` | body byte length | `u16` little-endian |
+| `[13,13+length)` | marker body | exactly `length` bytes |
 
-[SOL-SHD-0020] Framing error precedence **MUST** validate shred/FEC structure and the
-DATA_COMPLETE boundary first; once a complete component boundary exists, it decodes the
-outer count, then Entries in field order, and then requires exact consumption. Thus a missing
-DATA_COMPLETE before the next required boundary is `InvalidBlock::InvalidShredData` or
-incomplete according to whether LAST proves the omission; a present boundary with a
-truncated count, an Entry that crosses the boundary, or leftover bytes is
-`InvalidBlock::LedgerDecode`.
+The first body byte is the selected marker's version and is exactly `1`. Header and
+update-parent bodies are each 41 bytes: the version byte, a `u64` little-endian parent
+slot, and a 32-byte parent block ID. The footer body is:
+
+**Normative table. BlockFooterV1 body.**
+
+| Order | Field | Exact encoding |
+|---:|---|---|
+| 1 | footer version | `u8 = 1` |
+| 2 | bank hash | 32 bytes |
+| 3 | block-producer time | `u64` little-endian nanoseconds |
+| 4 | user-agent length | `u8` |
+| 5 | user-agent | the declared `0..=255` bytes |
+| 6 | finalization-certificate option | `u8` tag `0` or `1`, followed by the value when `1` |
+| 7 | skip-reward-certificate option | `u8` tag `0` or `1`, followed by the value when `1` |
+| 8 | notar-reward-certificate option | `u8` tag `0` or `1`, followed by the value when `1` |
+
+**Normative table. Footer certificate records.**
+
+| Record | Exact fields in order |
+|---|---|
+| votes aggregate | compressed BLS signature, 96 bytes; bitmap byte length, `u16` LE; signer bitmap |
+| finalization certificate | slot, `u64` LE; block ID, 32 bytes; final votes aggregate; notar aggregate option tag `u8`, then aggregate when `1` |
+| skip reward certificate | slot, `u64` LE; compressed BLS signature, 96 bytes; `ShortU16` bitmap byte length; signer bitmap |
+| notar reward certificate | slot, `u64` LE; block ID, 32 bytes; compressed BLS signature, 96 bytes; `ShortU16` bitmap byte length; signer bitmap |
+
+A signer bitmap is version byte `0`, bit count as `u16` little-endian, then exactly
+`ceil(bit_count/8)` bytes. Bits are packed least-significant bit first and identify
+validators by the epoch rank map. Unused high bits in the last byte are zero.
+
+[SOL-SHD-0018] The component sequence **MUST** be one header, zero or more nonempty
+Entry batches, one footer, and one terminal alpentick Entry batch, in that order. The
+header is the first component; the footer is followed immediately by a batch containing
+exactly the one tick described in Section 8.4; and that batch is the last component.
+No component may follow it. Each component **MUST** consume its bytes exactly.
+
+[SOL-SHD-0019] The header parent slot **MUST** equal the selected bank parent and its
+parent block ID **MUST** equal that parent's Section 14.5 block ID. The footer timestamp
+must fit `i64` and lie inclusively in
+`[parent_time_nanos + 1, parent_time_nanos + 2*elapsed_slot_duration_nanos]`, using
+saturating arithmetic. The footer bank hash **MUST** equal the hash of the frozen bank.
+An update-parent or genesis-certificate marker is structurally decodable but invalid in
+the epoch-`E` steady-state profile.
+
+[SOL-SHD-0020] Framing precedence **MUST** validate shred/FEC structure and a
+DATA_COMPLETE boundary first. At a present boundary, decode the `u64` count; zero enters
+the marker grammar and nonzero enters the Entry grammar. Then require exact consumption.
+A truncated count, field crossing the boundary, mismatched marker length, empty ordinary
+batch, or leftover byte is block-fatal. A receiver **MUST NOT** concatenate components
+to repair a truncated field. Any data shred after LAST_IN_SLOT, more than `512`
+components, or more than `10,485,760` Entry bytes is block-fatal.
 
 The `InvalidBlock::*` names in this section are specification disposition codes. They
 are not ledger bytes, network error codes, or names imported from any validator
@@ -1817,19 +1992,18 @@ candidate order.
 
 **Informative diagram.**
 
-```mermaid
-stateDiagram-v2
-    [*] --> Incomplete
-    Incomplete --> Candidate: all required shreds reconstructed
-    Incomplete --> Incomplete: more valid shreds arrive
-    Candidate --> Invalid: any Chapter 9–14 check fails
-    Candidate --> ValidCandidate: all Chapter 9–14 checks pass
-    ValidCandidate --> Votable: no known duplicate and Chapter 15 passes
-    ValidCandidate --> DuplicateUnconfirmed: authenticated conflict observed
-    DuplicateUnconfirmed --> DuplicateConfirmed: observed stake exceeds the exact threshold
-    DuplicateConfirmed --> Repair: local bank hash is absent or different
-    Repair --> DuplicateConfirmed: repaired version replays to the confirmed hash
-    DuplicateConfirmed --> Votable: local version matches and Chapter 15 passes
+```plantuml
+@startuml
+[*] --> Incomplete
+Incomplete --> Candidate : all required shreds reconstructed
+Incomplete --> Incomplete : more valid shreds arrive
+Candidate --> Invalid : any Chapter 9-14 check fails
+Candidate --> Replayed : all Chapter 9-14 checks pass
+Replayed --> Votable : Chapter 15 safety predicate passes
+Replayed --> Conflicting : another block ID exists for the slot
+Conflicting --> Votable : exact block gains required certificate
+Conflicting --> Rejected : conflicting block gains required certificate
+@enduml
 ```
 
 [SOL-BLK-0001] A validator **MUST** keep “incomplete” distinct from “invalid”: absence
@@ -1847,48 +2021,30 @@ The same slot participates in several typed identities. They are not interchange
 | Domain | Exact key | Binding rule |
 |---|---|---|
 | shred equivocation | `(slot:u64, index:u32, shred_type)` | two authenticated unequal shred byte strings at the same key are conflicting evidence |
-| reconstructed candidate | `(slot:u64, parent_slot:u64, terminal_fec_root[32])` | every contributing FEC set must form the one validated chained-root sequence ending at `terminal_fec_root` |
-| frozen bank and vote target | `(slot:u64, bank_hash[32])` | replay of one reconstructed candidate and parent bank produces the bank hash |
-| duplicate confirmation | `(slot:u64, bank_hash[32])` | stake is accumulated only for this exact frozen-bank identity |
-| repair version | `(slot:u64, terminal_fec_root[32])` | returned shreds must reconstruct the requested chained-root version; replay must then produce the expected bank hash before voting |
-| fork-choice node | `(slot:u64, bank_hash[32])` | parent edge is `(parent_slot,parent_bank_hash)` from the frozen bank |
+| reconstructed candidate | `(slot:u64, parent_slot:u64, block_id[32])` | the ordered FEC roots and parent commitment produce the Section 14.5 block ID |
+| frozen execution result | `(slot:u64, block_id[32], bank_hash[32])` | replay must produce the bank hash committed by that candidate's footer |
+| consensus vote or certificate | `(kind,slot,block_id)` for block-bearing kinds; `(kind,slot)` otherwise | stake and signatures accumulate only for the exact typed target |
+| repair version | `(slot:u64, block_id[32])` | returned shreds must reconstruct that block ID and then pass replay |
+| consensus ancestry | `(slot:u64, block_id[32])` | parent edge comes from the validated block header |
 
-Duplicate-confirmation support comes from
-signature-verified votes authorized for their vote accounts in the voted slot's epoch.
-For one exact `(slot,bank_hash)`, count each vote account at most once and weight it by
-that epoch's delegated stake. A duplicate-confirmed descendant can confirm an ancestor
-version only when its verified ancestry and terminal FEC roots uniquely bind that
-ancestor. For the hash-specific observation threshold, convert `total_epoch_stake` to
-IEEE-754 binary64 with round-to-nearest, ties-to-even, multiply by the binary64 value
-whose bits are `0x3fe0a3d70a3d70a4` (the nearest value to `0.52`), round the product in
-binary64, and truncate the positive result to `u64`:
+[SOL-BLK-0003] Conflicting blocks in one slot **MUST** remain separate by block ID.
+Votes for different block IDs **MUST NOT** be combined into a threshold, and a
+certificate for one block ID **MUST NOT** make another candidate valid. A participant
+that has emitted its first Notar or Skip vote for the slot **MUST NOT** emit a conflicting
+first vote after discovering a duplicate.
 
-**Normative algorithm.**
+[SOL-BLK-0004] A participant that has not yet cast its first slot vote **MUST** apply
+the Chapter 15 safe-to-vote predicate independently to each valid, replayed candidate.
+An authenticated duplicate is not itself permission to vote. After a Notar certificate
+for one exact candidate is observed, descendants and finalization decisions **MUST** use
+that certified block and its committed ancestry; an uncertified conflicting candidate
+is not votable just because it was received first.
 
-```text
-duplicate_threshold_stake = trunc_u64(f64(total_epoch_stake) * f64_bits(0x3fe0a3d70a3d70a4))
-duplicate_confirmed = observed_support_stake > duplicate_threshold_stake
-```
-
-[SOL-BLK-0003] After learning an authenticated conflict for a slot, a participant
-**MUST** remove the affected version and its descendants from the vote-candidate set. It
-**MUST NOT** vote for a candidate at or through that slot until it has itself observed
-verified vote support strictly greater than the `duplicate_threshold_stake` above for
-one exact candidate version, or for a descendant that uniquely commits to that version.
-Equality does not pass.
-
-[SOL-BLK-0004] Duplicate-confirmation stake **MUST** be accumulated separately for each
-`(slot,bank_hash)`, using each authorized vote account at most once per hash; votes for
-conflicting hashes **MUST NOT** be combined to reach the threshold. A terminal FEC
-root, bank hash, vote, or repair proof belonging to a different typed identity **MUST
-NOT** be substituted.
-
-[SOL-BLK-0005] If the locally frozen bank hash equals the observed duplicate-confirmed
-hash, that version **MAY** be restored to fork-choice candidacy. If the local version is
-dead, absent, or has another hash, the participant **MUST** retain it as non-votable,
-repair the confirmed version, and replay every Chapter 9–14 check before that version or
-a descendant can be voted. Duplicate confirmation never makes a structurally or locally
-invalid block valid.
+[SOL-BLK-0005] A certificate never repairs a structurally invalid or unreplayed block.
+If the certified block is absent, incomplete, dead, has the wrong block ID, or freezes
+to another bank hash, the participant **MUST** abstain, obtain the exact certified
+version through repair, and rerun Chapters 9 through 14 before voting for it or a
+descendant.
 
 ## 10.2 Structural completeness
 
@@ -1928,7 +2084,8 @@ configuration requires **MUST** be checked before the block is accepted.
 [SOL-BLK-0013] Starting from the selected parent state, the validator **MUST** apply the
 ordered transactions and system transitions under Chapters 11 through 13 and **MUST**
 reject the candidate if replay returns a block-fatal error or the resulting commitments
-fail Chapters 14 and 15.
+fail Chapter 14. Chapter 15 separately determines whether the valid, replayed candidate
+is eligible for a local vote or consensus transition.
 
 Transaction-level failure represented as a deterministic transaction result is not
 automatically a block-fatal error; the runtime chapters define that boundary.
@@ -2020,13 +2177,17 @@ replaying the committed transaction results:
 
 | Resource | Maximum admitted in one produced block |
 |---|---:|
-| aggregate transaction cost | `100,000,000` cost units |
-| aggregate cost charged to any one writable account | `40,000,000` cost units |
-| aggregate statically requested System allocation size | `100,000,000` bytes |
+| aggregate transaction cost | `50,000,000` cost units |
+| aggregate cost charged to any one writable account | `20,000,000` cost units |
+| aggregate statically requested System allocation size | `50,000,000` bytes |
+| serialized Entry-batch bytes | `10,485,760` bytes |
+| data-shred index domain | `0..=16,383` |
+| coding-shred index domain | `0..=16,383` |
+| 32+32 FEC sets / DATA_COMPLETE components | `512` |
 
-The ledger envelope independently permits indices `0..32767` for data shreds and
-`0..32767` for coding shreds. Because every epoch-`E` FEC set is exactly 32 data plus 32
-coding shreds, a slot contains at most 1,024 FEC sets. The exact shred lengths, payload
+The ledger envelope independently permits indices `0..16383` for data shreds and
+`0..16383` for coding shreds. Because every epoch-`E` FEC set is exactly 32 data plus 32
+coding shreds, a slot contains at most 512 FEC sets. The exact shred lengths, payload
 capacities, fixed-set rules, and reconstruction threshold are in Chapter 9. There is no
 separate epoch-`E` numeric limit on transactions per block or signatures per block: the
 transaction envelope, shred envelope, cost counters, and
@@ -2042,20 +2203,20 @@ the aggregate, per-writable-account, and allocated-data limits.
 `WouldExceedMaxBlockCostLimit`, `WouldExceedMaxAccountCostLimit`, or
 `WouldExceedAccountDataBlockLimit` encountered in production excludes the transaction;
 the same result during replay is block-fatal. The Chapter 9 shred/FEC envelope is the
-independent byte-framing bound; no additional 20-MiB Entry-recording limit is part of
-epoch-`E` block validity. None of these limits substitutes for the per-transaction
+independent byte-framing bound, including the 10-MiB Entry-byte ceiling. None of these
+limits substitutes for the per-transaction
 execution meter in Chapter 12.
 
 ## 10.5 Acceptance and local disposition
 
-[SOL-BLK-0016] A slot **MUST NOT** become a voteable valid block until requirements
-SOL-BLK-0006 through SOL-BLK-0013 have all succeeded for the same candidate and parent
-and the duplicate state in Section 10.1 permits that exact version to reenter fork
-choice.
+[SOL-BLK-0016] A slot **MUST NOT** become a votable valid block until requirements
+SOL-BLK-0006 through SOL-BLK-0015 have all succeeded for the same candidate and parent,
+and Chapter 15 permits a vote for that exact block ID under the participant's persisted
+safety state.
 
 [SOL-BLK-0017] A validator **MUST** derive block identity, bank hash, vote target, and
-fork weight only from the single accepted ordered candidate; local arrival timing or the
-first conflicting shred observed **MUST NOT** alter those commitments.
+consensus eligibility only from the single accepted ordered candidate; local arrival
+timing or the first conflicting shred observed **MUST NOT** alter those commitments.
 
 [SOL-BLK-0018] Marking a slot dead in a local store **MAY** suppress repeated local
 replay work, but it **MUST NOT** be serialized or interpreted as a network proof that
@@ -2081,18 +2242,29 @@ every mutable selector comes from the parent-derived bank state.
 
 **Informative diagram.**
 
-```mermaid
-flowchart TD
-    P[Frozen parent bank] --> C[Construct child bank]
-    O[Ordered candidate block] --> V[Validate entries, ticks, and transactions]
-    C --> V
-    V --> T[Execute transactions in ledger order]
-    T --> F[Apply fees, sysvars, rewards, and freeze hooks]
-    F --> H[Compute account and bank commitments]
-    H --> B[Frozen child bank]
-    V -->|block-fatal error| I[Invalid block]
-    T -->|transaction error| R[Per-transaction rollback]
-    R --> T
+```plantuml
+@startuml
+rectangle "Frozen parent bank" as P
+rectangle "Construct child bank" as C
+rectangle "Ordered candidate block" as O
+rectangle "Validate entries, ticks,\nand transactions" as V
+rectangle "Execute transactions\nin ledger order" as T
+rectangle "Apply fees, sysvars, rewards,\nand freeze hooks" as F
+rectangle "Compute account and\nbank commitments" as H
+rectangle "Frozen child bank" as B
+rectangle "Invalid block" as I
+rectangle "Per-transaction rollback" as R
+P --> C
+O --> V
+C --> V
+V --> T
+T --> F
+F --> H
+H --> B
+V --> I : block-fatal error
+T --> R : transaction error
+R --> T
+@enduml
 ```
 
 [SOL-STA-0001] `ApplyBlock` **MUST** be a deterministic function of the parent bank, the
@@ -2122,7 +2294,7 @@ transaction in the child slot is executed.
 [SOL-STA-0006] Before the first transaction, `ApplyBlock` **MUST** apply the slot's
 scheduled partitioned-reward distribution and update the Clock, SlotHashes, StakeHistory
 when applicable, LastRestartSlot, and executable sysvar cache in the protocol order
-specified by Chapters 13 and 15.
+specified by Chapters 13 and 16.
 
 [SOL-STA-0007] Every feature-dependent branch used by child-bank construction,
 transaction processing, or freeze **MUST** be selected from the parent-derived bank's
@@ -2623,7 +2795,7 @@ committed protocol outputs.
 | `ArithmeticOverflow` | transition requires checked arithmetic and it overflows |
 | `UnsupportedSysvar` | requested sysvar is outside the active syscall/cache set |
 | `IllegalOwner` | requested new owner is forbidden |
-| `MaxAccountsDataAllocationsExceeded` | transaction allocation meter exceeds 100,000,000 bytes |
+| `MaxAccountsDataAllocationsExceeded` | positive transaction account-data growth exceeds `20,971,520` bytes |
 | `MaxAccountsExceeded` | runtime account collection exceeds its protocol bound |
 | `MaxInstructionTraceLengthExceeded` | push would exceed 64 trace entries |
 | `BuiltinProgramsMustConsumeComputeUnits` | a native dispatch returns without its mandatory charge |
@@ -3977,7 +4149,7 @@ SlotHistory bit `i` is the least-significant-bit-first bit `(i mod 64)` in block
 `floor(i/64)`. A slot `s` in `[next_slot.saturating_sub(1048576), next_slot)` is present
 exactly when bit `s mod 1048576` is set; a slot at or above `next_slot` is future and an
 older slot is too old. Mainnet EpochSchedule bytes are `(432000, 432000, false, 0, 0)`.
-Mainnet Rent bytes are `LE(6960,8) || 00 00 00 00 00 00 f0 3f || 32`; the final byte is
+Mainnet Rent bytes are `LE(5080,8) || 00 00 00 00 00 00 f0 3f || 32`; the final byte is
 decimal 50 (`0x32`) and the middle bytes are the little-endian IEEE-754 representation
 of `1.0` retained for compatibility.
 
@@ -4186,6 +4358,7 @@ representation in its place.
 | Signature Merkle tree | Section 8.2 | Transaction order, then signature order | PoH record mixin |
 | Account lattice element | `BLAKE3-XOF(LE(lamports,8) \|\| data \|\| executable_u8 \|\| owner \|\| address,2048)` | Zero-lamport accounts map to identity | Accounts-state accumulator |
 | Accounts lattice hash | 1,024 component-wise sums of `u16` elements modulo `2^16` | Order-independent multiset; each `u16` is little-endian | Bank-hash state commitment |
+| Alpenglow block ID | Section 14.5 | FEC roots in ledger order, then parent commitment | Consensus vote, certificate, ancestry, and repair identity |
 | Bank hash | Section 14.5 | Parent/order defined below | Vote/state identity |
 | Terminal FEC root | Full 32-byte Merkle root of the slot's final FEC set; Chapter 9 | Terminal root of the validated chained sequence | Shred-chain and repair-version identity |
 | Shred Merkle nodes and signatures | Chapter 9 | Variant-dependent | Shred authenticity and FEC-set commitment |
@@ -4219,10 +4392,41 @@ zero-lamport version both contribute the identity.
 [SOL-HSH-0005] The 2,048-byte lattice-hash serialization **MUST** encode accumulator
 components in index order as little-endian `u16` values.
 
-## 14.5 Bank hash
+## 14.5 Block ID and bank hash
 
-Let `P` be the parent bank hash, `N` the slot's processed signature count as `LE(N,8)`,
-`H` the slot's final PoH blockhash, and `A` the 2,048-byte accounts lattice hash.
+Let `R[0..n)` be the full 32-byte Merkle roots of the block's FEC sets in increasing
+`fec_set_index` order, where `n = final_data_shred_index / 32 + 1`. Let `ps` and `pb`
+be the header's parent slot and parent block ID. Append this already-hashed parent leaf:
+
+**Normative algorithm.**
+
+```text
+R[n] = SHA256(LE(ps,8) || pb || LE(n,4))
+```
+
+Reduce the `n+1` 32-byte leaves as a binary Merkle tree. Leaves are used directly; they
+do not receive another leaf-domain hash. At each level, duplicate an unpaired final
+node, and calculate each parent as:
+
+**Normative algorithm.**
+
+```text
+SHA256(0x01 || "SOLANA_MERKLE_SHREDS_NODE" || left[0:20] || right[0:20])
+```
+
+The final 32-byte root is the block ID.
+
+[SOL-HSH-0009] Block-ID calculation **MUST** include every FEC root exactly once in
+ledger order and the parent leaf exactly once at the end. It **MUST** use `n` as a
+little-endian `u32`, the 20-byte child truncation, and odd-node duplication above.
+
+[SOL-HSH-0010] A header parent block ID, repair request, Alpenglow block vote, and
+block-bearing certificate **MUST** bind this block ID. A terminal FEC root, bank hash,
+or another block's ID **MUST NOT** be substituted.
+
+The bank hash remains the execution-state commitment. Let `P` be the parent bank hash,
+`N` the slot's processed signature count as `LE(N,8)`, `H` the slot's final PoH
+blockhash, and `A` the 2,048-byte accounts lattice hash.
 
 1. `x := SHA256(P || LE(N,8) || H)`.
 2. `x := SHA256(x || A)`.
@@ -4263,193 +4467,270 @@ definitions. Full-accounts snapshot hashes are not vote commitments in the activ
 lattice-hash bank formula; snapshot verification remains required for trusted-state
 restoration but archive layout is outside scope.
 
-# 15. Consensus, voting, fork choice, and finality
+# 15. Consensus, voting, and finality
 
 ## 15.1 Consensus algorithm
 
-Mainnet epoch `E` uses Tower voting over greedy heaviest-observed-subtree fork choice.
+Mainnet epoch `E` uses Alpenglow. Consensus operates on Section 14.5 block IDs and the
+current epoch's admitted vote-account stake set. It does not use Tower lockouts, switch
+proofs, or heaviest-observed-subtree fork choice.
 
-## 15.2 Vote tower state
+## 15.2 Consensus wire codec and signer set
 
-A tower contains a root and an ordered deque of at most 31 `(slot,confirmation_count)`
-lockouts in increasing slot order. A new lockout starts with confirmation count 1. Its
-lockout duration is `2^min(confirmation_count,31)` slots and its final locked-out slot
-is the saturating `u64` sum `slot+duration`.
+An `ALPENGLOW-WIRE-E1072` datagram is Wincode fixed-integer encoding with no alignment
+padding. It begins with outer-version byte `1`, then one kind record, then shred version
+`u16` little-endian. A block target is slot `u64` little-endian followed by its 32-byte
+block ID. Vote signatures are uncompressed BLS12-381 signatures of 192 bytes.
+
+**Normative table. Consensus-message kinds.**
+
+| Tag | Kind | Target and payload before final shred version |
+|---:|---|---|
+| `1` | Notar vote | block; vote signature |
+| `2` | Finalize vote | slot; vote signature |
+| `3` | Skip vote | slot; vote signature |
+| `4` | Notar-fallback vote | block; vote signature |
+| `5` | Skip-fallback vote | slot; vote signature |
+| `7` | Finalize certificate | slot; certificate signature |
+| `8` | Fast-finalize certificate | block; certificate signature |
+| `9` | Notar certificate | block; certificate signature |
+| `10` | Notar-fallback certificate | block; certificate signature |
+| `11` | Skip certificate | slot; certificate signature |
+
+A certificate signature is a 192-byte uncompressed aggregate BLS signature, a bitmap
+byte length as `u64` little-endian, and exactly that many bitmap bytes. Tags 6 and 12 are
+reserved and rejected in the epoch-`E` profile. Every other tag is unknown and rejected.
+
+The bitmap bytes begin with the one-byte version in the first column and then use the
+corresponding exact encoding:
+
+**Normative table. Certificate signer-map codec.**
+
+| Version | Header | Payload | Permitted certificate kinds |
+|---:|---|---|---|
+| `0` | bit count, `u16` LE | `ceil(bits/8)` bytes, ranks packed LSB first; unused high bits zero | all active kinds |
+| `1` | rank count, `u16` LE | `ceil(ranks/5)` bytes, five base-3 digits per byte | Notar-fallback and Skip only |
+
+For version 1, rank `i` has digit 0 for absent, 1 for the primary vote, and 2 for the
+fallback vote. Digits are grouped in increasing rank order; within a byte the first
+digit is the least-significant base-3 digit. After the declared digits are removed, the
+remaining quotient **MUST** be zero. The two signer sets are disjoint. For
+Notar-fallback the primary and fallback payloads are Notar and Notar-fallback; for Skip
+they are Skip and Skip-fallback. Version 1 is invalid for every other certificate.
+
+The signed vote payload is Wincode encoding of the same vote tag and target followed by
+shred version `u16`. The wire message then carries its own final shred-version field as
+well. Certificate verification reconstructs these payloads from the certificate kind,
+uses the bitmap ranks to select BLS public keys, and verifies the aggregate signature.
+
+[SOL-CON-0001] A receiver **MUST** require the wire shred version to be `50093`, decode
+the datagram exactly, and identify the sender's node identity from its authenticated
+connection. It **MUST** map that identity to one admitted vote account and derive its
+rank, BLS public key, and effective stake from the target slot's epoch stake map; none
+of those values is supplied by the datagram. Signature verification **MUST** reconstruct
+the signed vote payload with the same expected shred version.
+
+[SOL-CON-0002] A vote **MUST** verify against the canonical signed payload under the
+sender's BLS key. A certificate **MUST** have a canonical rank map, valid selected
+public keys, a valid aggregate signature over the appropriate payload or payload pair,
+and enough selected effective stake for its kind. A rank contributes at most once.
+
+## 15.3 Certificates and exact stake thresholds
+
+Let `T` be the sum of effective stake of all admitted epoch vote accounts and `S` the
+sum for the unique ranks selected by a valid certificate. Compare exact integers; do not
+convert them to floating point.
+
+**Normative table. Certificate thresholds.**
+
+| Certificate | Source votes | Acceptance condition |
+|---|---|---|
+| Notar | Notar for the exact block | `5*S >= 3*T` |
+| Notar-fallback | Notar and/or Notar-fallback for the exact block | `5*S >= 3*T` |
+| Skip | Skip and/or Skip-fallback for the slot | `5*S >= 3*T` |
+| Finalize | Finalize for the slot | `5*S >= 3*T` |
+| Fast-finalize | Notar for the exact block | `5*S >= 4*T` |
+
+Equality passes every threshold. A certificate with zero total stake, a rank beyond the
+admitted map, or a bitmap length inconsistent with that map is invalid.
+
+[SOL-CON-0003] A participant **MUST** accumulate votes separately by kind and exact
+target, construct only the certificate combinations in the table, and apply the integer
+threshold before using or forwarding a certificate. Support for conflicting block IDs
+or different slots **MUST NOT** be combined. At most four distinct Notar-fallback
+certificates can exist for one slot; observing a fifth is a consensus-safety violation
+and it **MUST NOT** be added to parent readiness.
+
+## 15.4 Leader windows and parent readiness
+
+One scheduled leader owns four consecutive slots. A slot whose index is divisible by
+four is the first slot of its leader window. For a proposed first-slot block `x` with
+parent `p`, `p` is parent-ready when:
+
+1. a Notar, Notar-fallback, or Fast-finalize certificate exists for exactly `p`; and
+2. every slot from `p.slot + 1` through `x.slot - 1` has a Skip certificate.
+
+Within the remaining three slots of a leader window, the parent must be the immediately
+preceding slot's exact block. A validator can extend it only after casting its own Notar
+vote for that parent.
+
+When several blocks are parent-ready for the same production window, choose the
+lexicographically least `(slot,block_id)` pair. A leader does not produce a stale window
+after observing a later parent-ready slot.
+
+[SOL-CON-0004] A first-slot block **MUST NOT** be produced or Notar-voted without the
+parent-ready certificate chain above. An intra-window block **MUST** name the preceding
+slot and exact block ID, and a participant **MUST NOT** Notar-vote it unless its own
+persisted history contains a Notar vote for that parent.
+
+[SOL-CON-0005] Parent readiness **MUST** be derived from verified certificates, not
+unaggregated vote counts. Every skipped slot in the gap requires its own Skip
+certificate; a later certificate does not silently fill an uncertified gap.
+
+## 15.5 Vote state and safe fallback predicates
+
+For each slot, persistent safety state records the exact votes emitted and whether the
+slot is over. The first ordinary vote is either Notar for one replayed block or Skip for
+the slot, never both. Later fallback votes do not erase that first vote.
+
+For one slot let `N(b)` be stake that sent a Notar vote for exact block `b`, `K` stake
+that sent Skip, `N_all` the sum of Notar stake across all block IDs, and `N_max` the
+largest `N(b)`. Count each admitted vote account once in each applicable set.
+
+**Normative algorithm.**
+
+```text
+safe_to_notar(b) = N(b) * 5 >= T * 2
+                or (N(b) * 5 >= T
+                    and (N(b) + K) * 5 >= T * 3)
+
+safe_to_skip = (K + N_all - N_max) * 5 >= T * 2
+```
+
+The first predicate means at least 40% Notar for `b`, or at least 20% Notar for `b`
+and at least 60% combined Notar-for-`b` plus Skip. The second requires at least 40%
+stake that cannot all support one block. Equality passes. Arithmetic uses exact `u128`
+products and sums.
+
+After the first-vote window, `safe_to_notar(b)` permits a Notar-fallback vote for `b`;
+`safe_to_skip` permits a Skip-fallback vote for the slot. A participant may emit a
+Notar-fallback vote once for each of at most three distinct block targets and may emit
+one Skip-fallback vote. A fallback matching an already emitted vote is a duplicate, not
+a second contribution. Every fallback retains the prior first vote.
+
+**Normative table. Per-validator vote exclusions for one slot.**
+
+| Proposed vote | Existing vote state that forbids it | Duplicate that contributes no additional stake |
+|---|---|---|
+| Notar for `b` | ordinary Skip; ordinary Notar for a different block | ordinary Notar or Notar-fallback for `b` |
+| Skip | Finalize; ordinary Notar | prior Skip or Skip-fallback |
+| Notar-fallback for `b` | Finalize; three distinct prior Notar-fallback targets | prior Notar or Notar-fallback for `b` |
+| Skip-fallback | Finalize | prior Skip or Skip-fallback |
+| Finalize | Skip, Skip-fallback, or any Notar-fallback | prior Finalize |
+
+The exclusions apply irrespective of arrival order. An invalid combination is not
+counted toward any predicate or certificate. An ordinary first vote and its permitted
+fallback votes remain distinct signed messages, but one rank contributes at most once
+to a certificate's union signer set.
+
+[SOL-CON-0006] A participant **MUST** persist every emitted vote before another vote
+that could conflict with it becomes externally visible. Restart, identity change, or
+process failure **MUST NOT** permit two ordinary first votes, ordinary Notar votes for
+different targets, more than three distinct Notar-fallback targets, or another
+combination forbidden by the table for one slot.
+
+[SOL-CON-0007] Fallback votes **MUST** use the exact predicates above and verified
+first-vote observations. A participant **MUST NOT** treat a timeout, missing block, or
+local preference as evidence that either stake predicate passed.
+
+## 15.6 Notarization and finalization transitions
+
+A validator emits a Notar vote only after the exact candidate has passed replay and the
+parent rule in Section 15.4. On observing a Notar certificate for block `b`, it may emit
+Finalize for `b.slot` only if its persisted first vote for that slot was Notar for exact
+`b`, it has not already finalized the slot, and the leader window has not entered a
+conflicting skip/fallback state. Finalize names only the slot because the prerequisite
+local Notar vote binds the block.
 
 **Informative diagram.**
 
-```mermaid
-stateDiagram-v2
-    [*] --> EvaluateFork
-    EvaluateFork --> Abstain: lockout or vote threshold fails
-    EvaluateFork --> SwitchProof: candidate is on another fork
-    SwitchProof --> Abstain: switch stake <= 38 percent
-    SwitchProof --> AppendVote: switch stake > 38 percent
-    EvaluateFork --> AppendVote: candidate descends from last vote
-    AppendVote --> ExpireOldVotes
-    ExpireOldVotes --> RootOldest: 31 votes remain
-    ExpireOldVotes --> IncrementConfirmations: fewer than 31 remain
-    RootOldest --> IncrementConfirmations
-    IncrementConfirmations --> EvaluateFork
+```plantuml
+@startuml
+[*] --> Waiting
+Waiting --> NotarVoted : valid block and parent rule
+Waiting --> SkipVoted : slot timeout without a valid vote
+NotarVoted --> FinalizeVoted : exact Notar certificate
+NotarVoted --> FallbackPhase : conflicting first-vote evidence
+SkipVoted --> FallbackPhase : safe fallback evidence
+FallbackPhase --> NotarFallbackVoted : safe_to_notar(block)
+FallbackPhase --> SkipFallbackVoted : safe_to_skip
+FinalizeVoted --> Finalized : Finalize certificate
+NotarVoted --> Finalized : Fast-finalize certificate
+@enduml
 ```
 
-To simulate/apply a vote for `v`:
+[SOL-CON-0008] A participant **MUST NOT** Finalize a slot unless it previously Notar-
+voted the exact certified block and the Notar certificate passes Section 15.3. It
+**MUST NOT** emit Finalize for two blocks indirectly by changing its remembered first
+vote.
 
-1. If `v` is not greater than the newest stored vote, make no change.
-2. Pop newest votes while their final locked-out slot is less than `v`.
-3. If 31 votes remain, pop the oldest and set it as the new root.
-4. Append `(v,1)`.
-5. For each vote at zero-based deque index `i`, increment its confirmation count by 1
-   exactly when `deque_length > i + confirmation_count`; addition saturates at
-   `u32::MAX`, while lockout exponent remains capped at 31.
+[SOL-CON-0009] An observed certificate changes consensus state only after its aggregate
+signature, signer map, threshold, target, shred version, and ancestry have all verified.
+Unknown or unreplayed targets may trigger repair but **MUST NOT** be treated as locally
+valid or rooted before replay succeeds.
 
-[SOL-CON-0001] A participant **MUST** update its tower exactly by the preceding ordered
-algorithm; in particular a lockout expiring at slot `v` remains locked at `v` because it
-is popped only when `last_locked_out_slot < v`.
+## 15.7 Finality and ancestry
 
-[SOL-CON-0002] Before voting for slot `v`, a participant **MUST** reject `v` as locked
-out if `v` is not newer than its latest vote/root, or if after simulating `v` any
-retained vote other than `v` is not an ancestor of `v`.
+A block is fast-finalized by a valid Fast-finalize certificate for its exact block ID.
+It is slow-finalized by a valid Notar certificate for the exact block plus a valid
+Finalize certificate for its slot. Either route uses the thresholds in Section 15.3.
+Finalizing a block also finalizes every block on its validated parent chain and skips
+slots omitted by that chain.
 
-## 15.3 Vote threshold
+[SOL-CON-0010] A participant **MUST** accept finality only for an exact block whose
+header ancestry is available and internally consistent. Before advancing the execution
+root, it **MUST** reconstruct and replay the block, match the Section 14.5 block ID, and
+match the footer bank hash to the frozen bank. A certificate alone is not an execution
+state commitment.
 
-After simulating candidate vote `v`, inspect the ninth vote from the newest (depth 8,
-with newest at depth 0). If none exists, the depth threshold passes. Otherwise let `q`
-be that vote's slot and let `stake(q)` be stake whose latest landed vote is `q` or a
-known descendant of `q`, using the candidate bank's epoch vote-account snapshot. The
-threshold passes when `stake(q)/total_stake > 2/3`. It also passes when the
-pre-simulation tower already contained `q` at the same confirmation count, because the
-candidate did not increase that lockout.
+## 15.8 Duplicates, repair, and root advancement
 
-[SOL-CON-0003] A participant **MUST NOT** vote when the depth-8 threshold exists and
-neither the unchanged-lockout exception nor the strict greater-than-two-thirds stake
-test passes.
+Different block IDs at one slot are competing Alpenglow proposals. Votes and
+certificates remain keyed to their exact target as required by Section 10.1. A valid
+Notar or stronger certificate identifies the block version that may extend consensus;
+it does not make missing ledger bytes, an invalid footer, or a bank-hash mismatch valid.
 
-## 15.4 Switching forks
+[SOL-CON-0011] On learning a certificate for an absent or conflicting version, a
+participant **MUST** request and authenticate shreds for the certified block ID, keep
+conflicting FEC sets separate, and replay the certified version before voting on a
+descendant or advancing its root. It **MUST NOT** combine a certificate's stake with
+votes for another block ID.
 
-A candidate descending from the participant's last vote is on the same fork and requires
-no switch proof. For a different-fork candidate `s`, let `l` be the participant's
-last-voted slot. A frozen-bank vote at `c` is eligible only when `c` is not `l`, is
-above the root, is not a descendant of `l`, and `s` descends from the greatest common
-ancestor of `c` and `l`. For each eligible fork, examine only its newest frozen bank.
-Count a vote account when one of its lockout intervals starts above the root, starts
-outside `ancestors(l)`, and ends at or after `l`; also count its latest observed
-frozen-bank vote when that vote is newer than `l` and passes the same ancestry
-predicate. Count each vote account's epoch stake at most once.
+[SOL-CON-0012] Root advancement **MUST** follow a locally replayed finalized block.
+Selectable state not descending from the new root is discarded; bytes retained for
+equivocation evidence or repair remain nonselectable. A restart **MUST** restore the
+highest durable root, emitted-vote history, and highest parent-ready state without
+creating an opportunity to equivocate.
 
-[SOL-CON-0004] A participant **MUST NOT** switch from a still-relevant last-voted fork
-unless qualifying switch-proof stake divided by total epoch stake is strictly greater
-than `0.38`.
+## 15.9 Timing and liveness policy
 
-[SOL-CON-0005] The switch vote instruction **MUST** carry the selected switch-proof bank
-hash; a same-fork vote uses the corresponding non-switch instruction variant. Restored
-votes that cannot be placed in the rooted ancestry **MUST NOT** contribute to a switch
-proof. Missing ancestry **MUST** cause abstention until the ancestry is resolved; it is
-not evidence of a qualifying divergent vote.
+The protocol target is `200` milliseconds per slot. A leader window spans four slots.
+Let `t0` be the local instant when parent readiness starts the window. The nominal
+handover allowance is `400` milliseconds and each block allowance is `200`
+milliseconds. The four nominal ordinary-Skip deadlines are therefore
+`t0 + 600 ms`, `t0 + 800 ms`, `t0 + 1,000 ms`, and `t0 + 1,200 ms`. An already emitted
+ordinary first vote suppresses the corresponding Skip.
 
-## 15.5 Fork-choice weight
+Network synchrony analysis uses `DELTA = 250` milliseconds. Standstill backoff, a
+separate crashed-leader notification, and delaying or abstaining from an otherwise
+permitted Skip are local liveness policy. These clocks create Skip opportunities but do
+not make an otherwise invalid vote or certificate valid.
 
-Maintain a rooted tree keyed exactly by `(slot,bank_hash)`, with parent edges keyed by
-`(parent_slot,parent_bank_hash)`. A terminal FEC root is not part of this key. The tree's
-vote-observation input is closed:
-
-**Normative table. Fork-choice observation sources.**
-
-| Source | May update GHOST weight? | Use outside GHOST |
-|---|---|---|
-| latest landed vote decoded from a frozen bank's Vote account when initializing the view | yes | vote threshold, switch proof, and duplicate handling as separately specified |
-| a successfully executed Vote transaction observed while replaying a block, when its voted `(slot,bank_hash)` is locally known and frozen | yes | same |
-| gossip vote not yet landed through local replay | no | duplicate confirmation, switch proof, and propagation observations where those sections permit it |
-| participant's local Tower | no, except its own vote once observed by one of the preceding landed/replay paths | local lockout and vote-safety decisions |
-| vote for an unknown or unfrozen bank | no | retain only as a pending observation if local policy chooses |
-
-For each vote account, only its selected latest replay-observed frozen-bank vote
-contributes its epoch stake. A higher slot replaces a lower slot. For conflicting hashes
-at the same slot, the lexicographically smaller 32-byte bank hash is selected. Move that
-stake from the old voted node and its ancestors to the selected node and its ancestors.
-A node's weight is the mathematical sum of stake voted at it and every valid descendant.
-Each vote account contributes at most once, so the sum is at most total epoch stake and
-fits `u64`; overflow or wrapping is not a selectable behavior.
-
-Starting at the root, greedily select the valid child with greatest subtree weight and
-repeat to a leaf. Equal weights choose the lexicographically smaller
-`(slot,bank_hash)`, which first chooses the lower slot and then the lower raw hash bytes.
-
-[SOL-CON-0006] Fork choice **MUST** select the greedy heaviest valid subtree by the
-preceding rule, accept GHOST weight only from the listed replay/landed observation
-sources, and **MUST** use the lower `(slot,bank_hash)` tie-break; tree iteration and
-network arrival order must not affect selection for the same accepted observations.
-
-[SOL-CON-0007] A block version marked invalid by duplicate processing **MUST NOT** be a
-fork-choice candidate until the duplicate state machine establishes the
-repaired/duplicate-confirmed version as valid.
-
-## 15.6 Duplicate confirmation
-
-The duplicate-liveness threshold is `0.10`, the switch threshold is `0.38`, and the
-resulting duplicate threshold is `0.52`. Stake is accumulated from signature-verified,
-epoch-authorized votes for one exact `(slot,bank_hash)` as specified in Section 10.1.
-The accompanying terminal FEC root binds repair and shred ancestry; it cannot merge
-support for different bank hashes.
-
-[SOL-CON-0008] Duplicate confirmation **MUST** require supporting stake to exceed the
-exact hash-specific `duplicate_threshold_stake` in Section 10.1; equality does not pass.
-A participant that has learned a duplicate **MUST** abstain from voting at or through
-that slot until the observation, matching, repair, and replay conditions in
-`SOL-BLK-0003` through `SOL-BLK-0005` have completed.
-
-[SOL-CON-0009] Conflicting shred/block data **MUST** be retained only as needed for
-duplicate proof and repair, and a participant **MUST NOT** vote for a locally invalid
-candidate just because another version of the same slot reached duplicate threshold.
-Duplicate proof and repair messages **MUST** retain the terminal FEC root with every
-candidate version and **MUST NOT** splice shreds or ancestry evidence belonging to
-different identifiers.
-
-## 15.7 Leader propagation guard
-
-After producing a leader block, a participant tracks its most recent unrooted leader
-slot on each candidate fork. Distinct observed vote-account addresses and validator
-identities supporting that slot/descendants contribute at most their epoch stake.
-Support for a descendant implies propagation of ancestors.
-
-[SOL-CON-0010] Except when evaluating its own leader slot or when the relevant leader
-slot is already rooted/vacuous, a participant **MUST NOT** vote further on a fork until
-its latest leader block has observed propagation stake strictly greater than one third
-of total epoch stake.
-
-This is a liveness/interoperability voting guard, not a block-validity rule: another
-validator can validly vote the same block while having different local leader history.
-
-## 15.8 Root and finality
-
-Applying a new vote to a full 31-entry tower roots the popped oldest slot locally. Root
-advancement prunes non-descendants and prevents later votes at or below the root.
-On-chain vote state carries the lockout deque and root; a newer safely landed on-chain
-tower may be adopted after preserving any higher local root.
-
-[SOL-CON-0011] After any restart or failover, a participant **MUST** recover a tower and
-root that include every still-live lockout created by its previously emitted votes. It
-**MAY** restore local safety state or adopt a newer landed on-chain tower only after
-verifying compatible ancestry and without decreasing the trusted root. It **MUST NOT**
-emit another vote unless the recovered state proves the new vote compatible with every
-still-live lockout; when that proof cannot be established, it **MUST** abstain. This
-invariant does not prescribe a storage format, write protocol, or failure-recovery
-mechanism.
-
-[SOL-CON-0012] When a tower update produces a new root, fork choice and retained replay
-state **MUST** discard non-descendants of that root from selectable state; data retained
-solely for duplicate evidence does not become selectable.
-
-“Finalized” in this Tower specification means that at least two thirds of epoch stake
-has landed a vote whose on-chain root is the slot or its descendant. A local tower root,
-processed status, or optimistic confirmation alone is not global finality.
-
-## 15.9 Safety versus policy
-
-Lockouts, switch threshold, vote depth threshold, tower persistence, duplicate-version
-exclusion, and rooted-fork pruning are safety requirements. Retry cadence, gossip
-fanout, vote refresh frequency, and choice to abstain are local liveness policy except
-where another chapter gives an explicit interoperability bound.
+[SOL-CON-0013] Persisted vote safety, exact-target separation, certificate thresholds,
+parent readiness, and rooted-fork pruning are protocol requirements. Retry cadence,
+certificate rebroadcast, standstill detection, queue sizing, and voluntary abstention
+are local liveness policy except where a wire or timeout value is explicitly required
+for interoperability.
 
 # 16. Epochs, leader schedule, stake, fees, and rewards
 
@@ -4461,7 +4742,7 @@ Mainnet has `slots_per_epoch = 432000`, `leader_schedule_slot_offset = 432000`,
 within its epoch is `s mod 432000`.
 
 The active epoch-`E` slot-parameter profile has a target duration of exactly
-`400,000,000` nanoseconds per slot. This target supplies the `78,892,314.984`
+`200,000,000` nanoseconds per slot. This target supplies the `157,784,629.968`
 slots-per-year value used by Section 16.6; wall-clock arrival before or after that
 target does not by itself make a block valid or invalid.
 
@@ -4530,30 +4811,39 @@ slot.
 Effective stake is derived from stake-account delegation
 `(stake, activation_epoch,deactivation_epoch)`, its delegated vote address, and the
 StakeHistory records in Section 13.4. The warmup/cooldown-rate transition activated at
-slot `244,080,000`, the first slot of epoch `565`. For an activation or deactivation
-step entering epoch `e`, use binary64 rate `0.25` when `e < 565` and binary64 rate
-`0.09` when `e >= 565`; the rate in epoch `E` is therefore `0.09`.
+slot `244,080,000`, the first slot of epoch `565`. For a change entering epoch `e`, the
+integer rate is `2,500` basis points when `e < 565` and `900` basis points when
+`e >= 565`.
 
-[SOL-EPO-0006] Stake weight used for leader selection, voting thresholds, fork choice,
-and rewards **MUST** come from the specific epoch snapshot named by the applicable
-algorithm; current account lamports or a later epoch's effective stake **MUST NOT** be
-substituted. Effective stake **MUST** use the epoch-565 rate transition and the
-activation/deactivation arithmetic below.
+[SOL-EPO-0006] Stake weight used for leader selection, voting thresholds, consensus
+certificates, and rewards **MUST** come from the specific epoch snapshot named by the
+applicable algorithm; current account lamports or a later epoch's effective stake
+**MUST NOT** be substituted. Effective stake **MUST** use the epoch-565 rate transition
+and the activation/deactivation arithmetic below.
 
 For activation, begin with zero effective stake at `activation_epoch`. For each
-following epoch, using the preceding StakeHistory record, calculate
-`weight = remaining_stake / cluster_activating` and
-`delta = max(1, trunc_u64(weight * cluster_effective * rate(e)))`; add `delta` and cap
-at delegated stake. Stop when the target or deactivation epoch is reached, history is
-missing, or cluster activating stake is zero. Missing activation history makes the
-delegation fully effective. For deactivation, begin with the stake effective at
-`deactivation_epoch`; for each following epoch calculate
-`weight = remaining_effective / cluster_deactivating` and the same rate-selected
-`delta`, subtract saturating, and stop at zero, the target, missing history, or zero
-cluster deactivating stake. Missing deactivation history makes the delegation fully
-inactive. All divisions and products in this paragraph use IEEE-754 binary64
-round-to-nearest-ties-to-even; conversion to `u64` truncates toward zero and saturates
-at the integer range.
+following epoch, using the preceding StakeHistory record, let `A` be the account's
+remaining activating stake, `CA` the cluster activating stake, `CE` cluster effective
+stake, and `r` the selected basis-point rate. Calculate:
+
+**Normative algorithm.**
+
+```text
+allowance = min(A, floor(sat_u128(A * CE * r) / (u128(CA) * 10000)))
+delta = min(A, max(1, allowance))
+```
+
+If `A` is zero, stop. If `CA` is zero, stop without applying a delta. If `CE` is zero,
+`allowance = 0` and the one-lamport progress rule applies. Add `delta`, capped at
+delegated stake. Stop at the target or deactivation epoch, on missing later history, or
+when fully effective. Missing the initial activation record makes the delegation fully
+effective.
+
+For deactivation, begin with the stake effective at `deactivation_epoch` and apply the
+same formula with `A` equal to remaining effective stake and `CA` equal to cluster
+deactivating stake; subtract `delta` saturating. Missing the initial deactivation record
+makes the delegation fully inactive. All products are saturating `u128`; the denominator
+is exact `u128`; division is integer floor. No floating-point operation is used.
 
 ## 16.5 Fees
 
@@ -4572,76 +4862,102 @@ hash. Fifty percent of base fees **MUST** be burned and fifty percent credited t
 valid leader fee collector; priority fees **MUST** be credited in full to that
 collector. An invalid collector causes its distributable amount to be burned.
 
-The epoch-`E` collector is the scheduled leader identity account; the pending custom
-block-revenue-collector features are not active. Let `deposit` be the full
-prioritization fee plus the unburned 50 percent of the base/signature fee. If
-`deposit=0`, do nothing. Otherwise load the collector account, substituting the default
-zero-lamport System-owned account when absent, and validate in this order: owner is the
-System Program; adding `deposit` to lamports does not overflow `u64`; and the static
-rent-state transition from its pre-balance to post-balance and unchanged data length is
-permitted. On success, store the post-account and append a Fee reward record. On the
-first failure, do not store the account and add the entire `deposit` to the burn amount.
+The collector is read from the scheduled leader's vote state in the epoch-stakes
+snapshot used to construct the current leader schedule. Use its V4
+`block_revenue_collector`; if that field is unavailable, use the scheduled node identity.
+Let `deposit` be the full priority fee plus the unburned half of the base/signature fee.
+If `deposit=0`, do nothing. Otherwise load the collector account, substituting a default
+zero-lamport System-owned account when absent, and add with checked `u64` arithmetic.
 
-[SOL-EPO-0009] Fee-collector validation **MUST** use the scheduled leader identity and
-the ordered owner, overflow, and rent checks above. Invalid owner maps to
-`DepositFeeError::InvalidAccountOwner`, overflow to `DepositFeeError::LamportOverflow`,
-and rent failure to `DepositFeeError::InvalidRentPayingAccount`; each is a freeze-time
-deterministic burn disposition, not a `TransactionError` and not block-fatal.
-Capitalization **MUST** decrease by the base burn plus any failed deposit.
+If the collector is the leader's vote address, the checked addition is sufficient. For
+another address, validate in this order: its owner is the System Program; it is not in
+the reserved set; and either it is the incinerator, or its rent rule passes. Because the
+relaxed post-execution minimum-balance rule is active, a non-incinerator account with a
+nonzero pre-balance may remain rent-paying after deposit; a zero-pre-balance account must
+be rent-exempt after deposit. The incinerator bypasses the rent check and is burned at
+the normal freeze point.
+
+[SOL-EPO-0009] Fee-collector selection and validation **MUST** use the snapshot and
+ordered rules above. Overflow maps to `DepositFeeError::LamportOverflow`; external
+invalid owner to `InvalidAccountOwner`; reserved address to `ReservedCollector`; and
+rent failure to `InvalidRentPayingAccount`. On the first failure, do not store the
+account and burn the entire deposit. These are deterministic freeze-time dispositions,
+not `TransactionError` values and not block-fatal. Capitalization **MUST** decrease by
+the base burn plus every failed deposit.
 
 ## 16.6 Inflation and epoch rewards
 
-### 16.6.1 Reward boundary and eligible vote accounts
+### 16.6.1 Validator admission and the epoch boundary
 
-Let `d` be a distribution epoch and `r = d-1` its rewarded epoch. The reward transition
-runs while constructing the first produced bank in `d`, after the new epoch's feature
-activations and effective-stake calculation and before ordinary transactions. In this
-specification `d = E = 1015` and `r = 1014`. Let `C` be the bank capitalization at the
-point reward calculation begins, before any inflation commission or stake reward is
-credited. `C` is total capitalization in lamports; it is not circulating supply,
-effective stake, or the sum of delegated stake.
+Let `d` be a distribution epoch and `r = d-1` its rewarded epoch. At the first bank in
+`d`, construct the distribution vote-account map from effective delegated stake. An
+account is eligible only when it has nonzero delegated stake, a compressed BLS public
+key, and enough lamports for its V4 vote-state rent minimum plus one Validator Admission
+Ticket (VAT).
 
-The epoch-`E` reward configuration is:
-
-**Normative table.**
+**Normative table. Epoch-`E` admission values.**
 
 | Parameter | Active value |
 |---|---:|
-| reward consensus | Tower vote credits |
-| maximum admitted vote accounts | `2,000` |
-| vote-account BLS key | required |
-| minimum admitted vote-account balance | `27,074,400` lamports |
-| minimum admitted effective delegated stake | `1` lamport |
-| per-delegation minimum | none; zero effective stake earns zero points |
-| commission precision | basis points, `0..=10,000` |
-| commission-delay snapshot | one full epoch |
-| commission recipient | the delegated vote account |
-| planned stake-account updates per reward block | `4,096` |
+| maximum admitted vote accounts | `2,000` accounts |
+| VoteStateV4 data length | `3,762` bytes |
+| rent storage overhead | `128` bytes |
+| rent lamports per byte-year | `5,080` lamports |
+| exemption threshold | `1.0` years |
+| rent-exempt vote minimum | `19,761,200` lamports |
+| VAT per admitted account | `800,000,000` lamports/epoch |
+| admission minimum balance | `819,761,200` lamports |
+| stake-reward account stores | `2,048` accounts/block |
 
-Construct the distribution vote-account map from the vote accounts and effective
-delegated stake calculated for epoch `d`. An entry is initially eligible only when its
-effective delegated stake is nonzero, its V4-compatible state contains a BLS public key,
-and its balance is at least the rent-exempt minimum for 3,762 bytes:
+If more than 2,000 accounts pass the BLS, stake, and balance filters, determine the stake
+of the first truncated entry after descending-stake selection and retain only accounts
+with stake strictly greater than that value. Every account tied across the boundary is
+removed; a public key is not a tie-breaker. The resulting set and rank map govern
+Alpenglow transport, consensus stake, leader scheduling, reward certificates, and epoch
+reward distribution.
 
-**Normative algorithm.**
+For every admitted account, subtract exactly `800,000,000` lamports with checked
+arithmetic, record a VAT-debit reward, and credit the sum to the incinerator. The normal
+freeze-time incinerator transition removes that sum from capitalization.
 
-```text
-minimum_vote_balance = 6960 * (3762 + 128) = 27,074,400 lamports
-```
-
-If no more than 2,000 entries pass, retain all of them. Otherwise, let `f` be the stake
-of the entry at zero-based position 2,000 after ordering by decreasing effective
-delegated stake. Retain exactly the entries with stake strictly greater than `f`. Thus a
-tie crossing the admission boundary removes every entry in the tied group and can leave
-fewer than 2,000 entries; a public key does not break the tie.
-
-[SOL-EPO-0010] The epoch-`E` reward transition **MUST** reward epoch `1014` in the first
-produced bank of epoch `1015`, use the pre-reward capitalization `C`, and construct the
-distribution vote-account map with the balance, BLS, positive-stake, 2,000-entry, and
-boundary-tie rules above. A delegation whose vote address is absent from that map **MUST
-NOT** contribute reward points or receive an inflation payout.
+[SOL-EPO-0010] Epoch-boundary processing **MUST** apply the filters, tie rule, and VAT
+debit above before publishing the new epoch stake set. A vote account omitted from the
+set contributes no Alpenglow stake and a delegation to it receives no inflation reward
+for the distribution. The VAT is charged only to admitted accounts and is burned, not
+paid to the leader or carried into the inflation pool.
 
 ### 16.6.2 Inflation curve and reward pool
+
+The epoch inflation state is stored at
+`3vJzniWALu2qGFJ1ZY6JD3Y2ZmA5zWqmVdDX7yBXHgu7`. This is the off-curve program
+address derived with seed bytes `vote_reward_account`, bump `253`, and program ID
+`A1pengvuM6JEcyNuTnMqepBKhwHE3N6PmUrdATGawhJS`. The account is System-owned,
+nonexecutable, and rent-exempt. With the 49-byte epoch-`E` data and Section 3.1 rent
+parameters, its balance is exactly `899,160` lamports. Its data is the following
+Wincode fixed-integer record with no alignment padding.
+
+**Normative table. Epoch-`E` inflation-state account data.**
+
+| Byte range | Field | Epoch-1072 value |
+|---:|---|---:|
+| `[0,8)` | `current.max_possible_validator_reward:u64` LE | `62,395,745,304,053` lamports |
+| `[8,16)` | `current.slots_per_epoch:u64` LE | `432,000` slots |
+| `[16,24)` | `current.epoch:u64` LE | `1,072` |
+| `[24,25)` | previous-state option tag, `u8` | `1` |
+| `[25,33)` | `previous.max_possible_validator_reward:u64` LE | `62,417,544,028,268` lamports |
+| `[33,41)` | `previous.slots_per_epoch:u64` LE | `432,000` slots |
+| `[41,49)` | `previous.epoch:u64` LE | `1,071` |
+
+An option tag of `0` ends the record at byte 25; tag `1` requires the complete 24-byte
+previous state; every other tag, length, or trailing byte is invalid. At an epoch
+boundary, move the old current state to previous, calculate the new current state from
+the boundary capitalization and additional partitioned rewards below, serialize the
+record, and set the account balance to the exact rent-exempt minimum for its data size.
+
+[SOL-EPO-0011] A validator **MUST** decode, update, and use the epoch inflation account
+at the address and with the byte layout above. A reward certificate for an epoch other
+than the stored current or previous epoch has no inflation state and **MUST NOT** credit
+rewards. In epoch `1072`, the account data **MUST** be the 49-byte state in the table.
 
 Mainnet full inflation has the following binary64 inputs. Foundation inflation is
 disabled, so the validator rate equals the total rate.
@@ -4677,15 +4993,28 @@ activation_epoch = floor(64,800,004 / 432,000) = 150
 inflation_origin  = first(activation_epoch - 1) = 64,368,000
 ```
 
-No slot-time reduction is active through epoch `E`. Parse the decimal `78,892,314.984`
-to binary64 for the Mainnet slots-per-year value `Y`. For a distribution epoch `d`,
-elapsed time and the rewarded epoch's duration are:
+Elapsed inflation time is the sum of the wall-clock fractions in every active slot-time
+regime. The transition applies at the first slot of the listed effective epoch:
+
+**Normative table. Inflation-time regimes.**
+
+| Slot range | Effective epoch | Slot duration | Slots/year binary64 input |
+|---|---:|---:|---:|
+| `[64,368,000,440,640,000)` | legacy through `1019` | `400,000,000` ns | `78,892,314.984` |
+| `[440,640,000,442,368,000)` | `1020` | `350,000,000` ns | `90,162,645.696` |
+| `[442,368,000,447,984,000)` | `1024` | `300,000,000` ns | `105,189,753.312` |
+| `[447,984,000,454,896,000)` | `1037` | `250,000,000` ns | `126,227,703.974` |
+| `[454,896,000,...)` | `1053` | `200,000,000` ns | `157,784,629.968` |
+
+For current epoch `d`, let `t_d` be the sum of `(slots in regime)/(regime slots/year)`
+from inflation origin through `first(d)`. Its epoch duration uses the slots/year value
+active at `first(d)`:
 
 **Normative algorithm.**
 
 ```text
-t_d     = (first(d) - 64,368,000) / Y
-period_r = slots(r) / Y
+t_d      = sum_regimes(64,368,000, first(d))
+period_d = slots(d) / slots_per_year_at(first(d))
 ```
 
 The only reward boundary in this specification has these exact binary64 results. The bit
@@ -4695,21 +5024,24 @@ pattern column is the `u64` interpretation of the IEEE-754 binary64 encoding.
 
 | Quantity | Decimal rendering | Binary64 bits |
 |---|---:|---:|
-| `Y` | `78892314.98399999737739563` | `0x4192cf346bef9db2` |
-| `t_1015` | `4.74205884408225220` | `0x4012f7de460c29d1` |
-| `pow(0.85,t_1015)` | `0.46270095136468503` | `0x3fdd9ce4737c1f46` |
-| `validator(t_1015)` | `0.03701607610917480` | `0x3fa2f3c568a15bb2` |
-| `period_1014` | `0.00547581852665387` | `0x3f766dcfd7da5ad5` |
+| current slots/year | `157784629.96799999475479126` | `0x41a2cf346bef9db2` |
+| `t_1072` | `4.94877099346360882` | `0x4013cb8a9f91474d` |
+| `pow(0.85,t_1072)` | `0.44741488333907337` | `0x3fdca27208ebd6a3` |
+| `validator(t_1072)` | `0.03579319066712587` | `0x3fa2537c2eab6aa6` |
+| `period_1072` | `0.00273790926332694` | `0x3f666dcfd7da5ad5` |
+| `validator(t_1072) * period_1072` | `0.00009799850829155` | `0x3f19b0918d7c2c6d` |
 
-Convert `C` to binary64 using round-to-nearest, ties-to-even. The maximum epoch reward
-pool `R` is calculated in this exact operation order:
+At the epoch boundary, let `C` be capitalization before the new reward budget and let
+`A` be the partitioned rewards from the preceding epoch that are committed but not yet
+credited. Convert `C+A` to binary64 using round-to-nearest, ties-to-even. The current
+epoch's maximum validator-reward budget `R` is calculated in this exact operation order:
 
 **Normative algorithm.**
 
 ```text
-x0 = binary64(C)
-x1 = round_binary64(0x3fa2f3c568a15bb2 * x0)
-x2 = round_binary64(x1 * 0x3f766dcfd7da5ad5)
+x0 = binary64(C + A)
+x1 = round_binary64(0x3fa2537c2eab6aa6 * x0)
+x2 = round_binary64(x1 * 0x3f666dcfd7da5ad5)
 R  = trunc_u64(x2)
 ```
 
@@ -4718,75 +5050,80 @@ multiplication. Each multiplication rounds separately; reassociation to
 `C * (rate * period)` or contraction into a fused operation is not equivalent because
 `C` normally exceeds `2^53` lamports.
 
-[SOL-EPO-0011] The annual Mainnet inflation rate **MUST** be
+[SOL-EPO-0012] The annual Mainnet inflation rate **MUST** be
 `max(0.015, 0.08 * pow(0.85,t))`, with zero foundation allocation and the elapsed-time
-origin at slot `64,368,000`. At the epoch-`E` reward boundary the elapsed time, annual
-rate, and rewarded-epoch duration **MUST** have the exact binary64 bit patterns in the
-table above.
+origin at slot `64,368,000`. Elapsed time **MUST** use every historical slot-time regime
+in the table. At epoch `1072`, the elapsed time, annual rate, and duration **MUST** have
+the exact binary64 bit patterns above.
 
-[SOL-EPO-0012] The maximum epoch-1014 reward pool **MUST** be computed from the bank
-capitalization using the `x0`, `x1`, `x2`, `R` sequence above. Binary64 operations
+[SOL-EPO-0013] The epoch-1072 reward budget **MUST** be computed from `C+A` using the
+`x0`, `x1`, `x2`, `R` sequence above. Binary64 operations
 **MUST** use round-to-nearest, ties-to-even; conversion to `u64` **MUST** truncate
 toward zero; and reassociation, extended precision, or fused substitution **MUST NOT**
 change `R`.
 
-### 16.6.3 Vote credits and reward points
+### 16.6.3 Per-slot reward certificates and vote credits
 
-For one eligible stake delegation `j`, let `o_j` be its stored `credits_observed`. Read
-the delegated vote account's epoch-credit records in ascending record order. Each record
-is `(e, final_credits, initial_credits)`. Let `n = o_j` initially. For each record,
-calculate:
+The footer in block `s+8` may contain a Skip reward certificate, a Notar reward
+certificate, both, or neither for slot `s`. If both exist, their slot fields must match.
+Each is base-2 signer encoding and verifies the canonical Skip or exact-block Notar
+payload for shred version `50093`. Reward certificates have no minimum stake threshold;
+every correctly signed selected rank earns its individual share. The union of the two
+signer sets is deduplicated by vote-account address.
 
-**Normative algorithm.**
-
-```text
-if o_j < initial_credits:
-    earned = final_credits - initial_credits
-else if o_j < final_credits:
-    earned = final_credits - n
-else:
-    earned = 0
-
-n = max(n, final_credits)
-stake_at_e = effective_stake(delegation_j, e)
-points_j  += u128(stake_at_e) * u128(earned)
-```
-
-`effective_stake` is the Section 16.4 result for the epoch named by that credit record,
-not necessarily `r`. This permits an unpaid delegation to redeem credits retained from
-more than one epoch. Before iterating, compare the vote account's latest cumulative
-credits `v_j` with `o_j`: if `v_j < o_j`, set `points_j = 0` and plan to reset
-`credits_observed` to `v_j`; if `v_j == o_j`, set `points_j = 0` and make no update. All
-point products and sums are exact `u128` integers. Sum over all eligible delegations:
+Let `R_e` be the Section 16.6.2 budget recorded for the epoch of the crediting block,
+`V_s` one selected validator's effective delegated stake in the snapshot for slot `s`,
+and `T_s` total admitted stake in that snapshot. With `Q = 432,000` slots/epoch:
 
 **Normative algorithm.**
 
 ```text
-P = sum(points_j)
+gross_s_v     = floor(u128(R_e) * u128(V_s) / (u128(Q) * u128(T_s)))
+validator_s_v = floor(gross_s_v / 2)
+leader_s_v    = gross_s_v - validator_s_v
 ```
 
-If `P = 0`, the reward plan has `total_rewards = 0`, `total_points = 0`, no commission
-payments, and one empty distribution partition under Section 16.6.5; the independently
-calculated `R` is not issued.
+For every selected validator, add `validator_s_v` to that vote account's cumulative
+epoch credits. Sum `leader_s_v` over all selected validators and add the sum to the
+crediting block leader's vote account. These values are credit units denominated in
+lamports; vote-account lamports are not minted at this step. The footer timestamp also
+advances a selected vote state's latest vote/timestamp. Signers in a valid footer
+finalization certificate advance their vote-state root and latest vote to the certified
+slot.
 
-[SOL-EPO-0013] Reward points **MUST** be calculated from each eligible delegation's
-stored credits, the complete retained vote epoch-credit sequence, and effective stake at
-each record's epoch using the algorithm above. Point arithmetic **MUST** be exact
-`u128`, and a missing, non-Vote-owned, or admission-filtered vote account **MUST**
-contribute zero points.
+[SOL-EPO-0014] A reward certificate **MUST** refer to exactly `current_slot - 8`, use
+the rank and stake map for that reward slot, have canonical base-2 encoding, and have a
+valid aggregate signature for exactly its selected signer set. A block **MUST** fail if
+either certificate is malformed, targets another slot, or lacks its required rank map.
+Reward arithmetic **MUST** use the exact `u128` multiply, denominator, floors, half
+split, and vote-account updates above. An absent certificate simply issues no credits
+for that vote kind.
 
 ### 16.6.4 Per-delegation reward and commission
 
-When `P > 0`, the gross reward for a delegation with positive points is:
+At the next epoch boundary, redeem only the rewarded epoch's final vote-credit record.
+For delegation `j`, calculate `earned_j` from its stored `credits_observed` and that
+record's `(initial_credits,final_credits)` using:
 
 **Normative algorithm.**
 
 ```text
-gross_j = u64((points_j * u128(R)) / P)
+if credits_observed < initial_credits:
+    earned_j = final_credits - initial_credits
+else if credits_observed < final_credits:
+    earned_j = final_credits - credits_observed
+else:
+    earned_j = 0
+
+gross_j = floor(u128(earned_j) * u128(effective_stake_j_r)
+                / u128(total_effective_stake_to_vote_account_r))
 ```
 
-Multiplication and division are exact `u128`; division is integer floor. A zero result
-produces no payout and, in the ordinary Tower case, does not advance `credits_observed`.
+The denominator is captured at the end of rewarded epoch `r` for the admitted vote
+account. A missing or zero denominator, a missing distribution vote account, a record
+for another epoch, zero earned credits, or zero effective delegation yields no payout.
+For an active or activating delegation, Alpenglow still advances `credits_observed` to
+the record's final credits when an integer-floor result is zero.
 
 Commission is deliberately delayed. For distribution epoch `d` and rewarded epoch `r`,
 select the commission for a vote address in this order:
@@ -4797,48 +5134,38 @@ select the commission for a vote address in this order:
 3. otherwise, its state in the distribution vote-account map.
 
 For a V4 state, `c` is its inflation commission in basis points. For a legacy state,
-`c = 100 * commission_percent`. Clamp `c` to `0..=10,000`. The active Tower split is:
+`c = 100 * commission_percent`. Clamp `c` to `0..=10,000`. The active Alpenglow split
+preserves every whole lamport:
 
 **Normative algorithm.**
 
 ```text
-if c == 0:
-    voter_j  = 0
-    staker_j = gross_j
-else if c == 10000:
-    voter_j  = gross_j
-    staker_j = 0
-else:
-    voter_j  = floor(u128(gross_j) * c         / 10000)
-    staker_j = floor(u128(gross_j) * (10000-c) / 10000)
+staker_j = floor(u128(gross_j) * u128(10000-c) / 10000)
+voter_j  = gross_j - staker_j
 ```
 
-The two interior-case portions are floored independently. If `0 < c < 10000` and either
-portion is zero, omit the entire payout and do not advance the stake account's credits.
-Otherwise, add `staker_j` to both the stake account's lamports and its delegated stake,
-set its `credits_observed` to `n`, and add `voter_j` to the delegated vote account. The
-inflation-rewards collector field does not redirect commission in epoch `E`.
+Add `staker_j` to the stake account's lamports and, subject to the rent-adjustment rule,
+its delegated stake. Set `credits_observed` to the final rewarded-epoch credits. Credit
+`voter_j` to the vote state's `inflation_rewards_collector`, falling back to the vote
+account itself if the field is unavailable. A collector equal to the vote account is
+accepted. Another collector uses the same System owner, reserved-address, incinerator,
+rent, and overflow validation as Section 16.5; a failed external deposit is burned.
 
-Two zero-reward state-update cases remain eligible for a partition record:
+[SOL-EPO-0015] Each gross delegation reward **MUST** be the exact `u128`
+multiply-and-floor result above, using effective stake and the stored per-vote-account
+denominator for the rewarded epoch. Epoch credits **MUST** advance under the zero-reward
+credit rules above so old credits cannot be redeemed in a later epoch.
 
-- if the delegation's activation epoch equals `r`, advance its observed credits but pay
-  zero; and
-- if `v_j < o_j`, reset its observed credits to `v_j` but pay zero.
+[SOL-EPO-0016] The commission rate **MUST** come from the delayed snapshot selection
+above and **MUST** use the remainder-preserving split. Commission **MUST** be credited
+to the configured inflation-rewards collector or deterministically burned on failed
+external-collector validation.
 
-[SOL-EPO-0014] Each gross delegation reward **MUST** be the exact `u128`
-multiply-and-floor result above. A zero gross reward **MUST NOT** advance credits except
-in a named forced-update case.
-
-[SOL-EPO-0015] The commission rate **MUST** come from the delayed snapshot selection
-above and **MUST** be split with the endpoint and independent-floor rules above. An
-interior split yielding a zero portion **MUST** omit both portions, and epoch-`E`
-commission **MUST** be credited to the vote account rather than its V4 inflation-rewards
-collector field.
-
-[SOL-EPO-0016] A successful stake reward **MUST** increase account lamports and
-delegated stake by `staker_j`, set `credits_observed` to the calculated value `n`, and
-preserve the remaining stake state. Vote commission for all delegations to the same vote
-address **MUST** be summed and credited atomically at the epoch boundary.
+[SOL-EPO-0017] A successful stake reward **MUST** increase account lamports and
+delegated stake by `staker_j` except where the active rent adjustment caps delegated
+stake to `post_lamports - rent_minimum`. It **MUST** set `credits_observed` to the
+calculated final value and preserve remaining stake state. Commission for the same
+collector is accumulated before the epoch-boundary deposit.
 
 ### 16.6.5 Partition assignment and distribution
 
@@ -4848,8 +5175,8 @@ forced-credit updates but excluding omitted payouts. The number of partitions is
 **Normative algorithm.**
 
 ```text
-B = clamp(ceil(N / 4096), 1, 432000 / 10)
-  = clamp(ceil(N / 4096), 1, 43200)
+B = clamp(ceil(N / 2048), 1, 432000 / 10)
+  = clamp(ceil(N / 2048), 1, 43200)
 ```
 
 Let `seed` be the 32-byte last blockhash inherited from the parent by the epoch boundary
@@ -4870,19 +5197,29 @@ so skipped slots do not skip rewards.
 
 **Informative diagram.**
 
-```mermaid
-flowchart LR
-    A["Inactive before epoch boundary"] --> B["Boundary bank at height H"]
-    B --> C["Calculate R and P<br/>credit vote commission"]
-    C --> D["Create B partitions<br/>set active to true"]
-    D --> E["Height H + 1<br/>apply partition 0"]
-    E --> F["Height H + 1 + k<br/>apply partition k"]
-    F --> G{"Was partition B - 1 applied?"}
-    G -->|No| F
-    G -->|Yes| H["Set active to false"]
+```plantuml
+@startuml
+left to right direction
+rectangle "Inactive before\nepoch boundary" as A
+rectangle "Boundary bank\nat height H" as BOUNDARY
+rectangle "Calculate R and P;\ncredit vote commission" as C
+rectangle "Create B partitions;\nset active to true" as D
+rectangle "Height H + 1;\napply partition 0" as E
+rectangle "Height H + 1 + k;\napply partition k" as F
+diamond "Partition B - 1\napplied?" as G
+rectangle "Set active to false" as DONE
+A --> BOUNDARY
+BOUNDARY --> C
+C --> D
+D --> E
+E --> F
+F --> G
+G --> F : no
+G --> DONE : yes
+@enduml
 ```
 
-[SOL-EPO-0017] The reward transition **MUST** derive `B`, SipHash-1-3 input, unbiased
+[SOL-EPO-0018] The reward transition **MUST** derive `B`, SipHash-1-3 input, unbiased
 partition index, and distribution block height exactly as above. Each planned stake
 update **MUST** occur in exactly one partition, and a bank **MUST NOT** expose a later
 partition before all lower block-height partitions on its ancestry have been applied.
@@ -4896,20 +5233,19 @@ At the boundary, create or replace the EpochRewards sysvar with:
 | `distribution_starting_block_height` | `H + 1` |
 | `num_partitions` | `B` |
 | `parent_blockhash` | `seed` |
-| `total_points` | `P` |
-| `total_rewards` | `R` when `P > 0`, otherwise `0` |
-| `distributed_rewards` | commission lamports already paid or deterministically discarded |
+| `total_points` | `0` for a full Alpenglow rewarded epoch |
+| `total_rewards` | the rewarded epoch's recorded inflation budget `R` |
+| `distributed_rewards` | commission lamports credited, sent to the incinerator, or deterministically burned |
 | `active` | `true` |
 
 Each partition adds both successfully credited and deterministically discarded
-stake-reward lamports to `distributed_rewards`. Successfully credited voter and stake
-rewards increase capitalization when their accounts are updated; overflowed or otherwise
-uncreditable planned rewards do not. After partition `B-1`, set `active = false`. Any
-difference between `total_rewards` and the sum of credited rewards—caused by point
-apportionment, independent commission floors, omitted sub-lamport payouts, or failed
-account credit—is not minted.
+stake-reward lamports to `distributed_rewards`. Successfully credited commission and
+stake rewards increase capitalization, except amounts deposited to the incinerator,
+which are burned. Overflowed or otherwise uncreditable rewards are not minted. After
+partition `B-1`, set `active = false` and burn any remaining amount above the sysvar's
+rent-exempt reserve. Integer-floor residue is never minted.
 
-[SOL-EPO-0018] The EpochRewards sysvar **MUST** be initialized, advanced, and made
+[SOL-EPO-0019] The EpochRewards sysvar **MUST** be initialized, advanced, and made
 inactive with the field values and phases above. The inflation-derived capitalization
 increase **MUST** contain only rewards actually credited to accounts; undistributed
 rounding residue and failed credits **MUST NOT** be minted. Any separately specified
@@ -5056,9 +5392,10 @@ Chapter 9 owns byte validity and Chapter 15 owns candidate-version state.
 
 ## 18.5 Vote safety
 
-Tower persistence is a safety boundary. Operators must treat a lost or rolled-back tower
-as a potential double-vote condition, not merely an availability incident. Trusted
-roots, hard forks, authorized-voter state, and identity keys are configuration inputs
+Persisted Alpenglow vote history is a safety boundary. Operators must treat lost or
+rolled-back first-vote, fallback-vote, finalize-vote, parent-ready, or root state as a
+potential equivocation condition, not just an availability incident. Trusted roots,
+hard forks, epoch rank maps, BLS keys, and node-identity keys are configuration inputs
 whose mismatch can partition a validator or cause unsafe votes.
 
 ## 18.6 Cryptographic domains
@@ -5090,7 +5427,7 @@ informative active liveness profile; they are not block-validity limits.
 | account state | growth of one account in one instruction | `10,240` bytes | 4.2 |
 | account state | aggregate positive growth in one transaction | `20,971,520` bytes | 4.2 |
 | derived address | seeds / bytes per seed | `16` / `32` | 5.5 |
-| UDP / transaction | application payload or serialized transaction | `1,232` bytes | 6.1, 6.6, 7.2 |
+| UDP / TPU-vote transaction | application datagram or serialized transaction | `1,232` bytes | 6.1, 6.6, 7.2 |
 | gossip | combined CRDS values in push/pull response | `1,188` bytes | 6.2 |
 | gossip | pull-filter `mask_bits` minimum | `6` | 6.2 |
 | gossip | canonical/accepted CRDS Vote index | `<12` / `<32` | 6.3 |
@@ -5107,7 +5444,7 @@ informative active liveness profile; they are not block-validity limits.
 | gossip push | peers per bucket / sends per value / stake buckets | `12` / `9` / `25` | 6.3.1 |
 | QUIC/TLS | TLS version / ALPN | TLS `1.3` / `solana-tpu` | 6.6 |
 | QUIC/TLS | generated certificate length / public-key bytes | `249` / `32` bytes | 6.6 |
-| QUIC | one stream packet / connection receive window | `1..=1,232` / `8,388,608` bytes | 6.6 |
+| TPU QUIC | one transaction stream / connection receive window | `1..=4,096` / `8,388,608` bytes | 6.6 |
 | QUIC | inbound unidirectional streams after stake/RTT scaling | unstaked `128..=896`; staked `128..=3,584` | 6.6 |
 | QUIC | idle / handshake / incomplete-stream timeout | `30` / `2` / `2` seconds | 6.6 |
 | QUIC | admitted connections | `2,000` staked plus `2,000` unstaked | 6.6 |
@@ -5115,10 +5452,13 @@ informative active liveness profile; they are not block-validity limits.
 | QUIC | aggregate connection rate / burst | `2,500` connections per second / `1,000` | 6.6 |
 | QUIC | stream-arrival throttle | `500` streams per millisecond | 6.6 |
 | QUIC | application close codes | `1`, `2`, `4`, `5` | 6.6 |
+| Alpenglow QUIC | ALPN / path MTU / idle timeout | `alpenglow-v1` / `1,280` bytes / `5` seconds | 6.6.1 |
+| Alpenglow QUIC | carriage / streams / inbound connections per peer | DATAGRAM only / `0` / `2` | 6.6.1 |
 | repair | signed-request timestamp distance | `600,000` ms | 6.7 |
 | repair | Orphan responses / AncestorHashes pairs | `11` / `30` | 6.7 |
 | Turbine | fanout / maximum hops in epoch `E` | `200` / `4` | 6.8 |
 | transaction | required signatures | `1..=12` | 7.2 |
+| transaction | legacy and version-0 / version-1 serialized size | `1,232` / `4,096` bytes | 7.2 |
 | transaction | resolved accounts | `128` | 7.3 |
 | address table | stored addresses | `256` | 7.4 |
 | recent blockhash | queue length / maximum processing age | `300` / `150` | 7.5 |
@@ -5130,19 +5470,20 @@ informative active liveness profile; they are not block-validity limits.
 | compute budget | heap range and granularity | `32,768..=262,144`, multiple of `1,024` bytes | 7.6, 12.8.4 |
 | account loading | loaded account data per transaction | `67,108,864` bytes | 7.6–7.7 |
 | account loading | ordinary account overhead / ALT descriptor | `64` / `8,248` bytes | 7.7.1 |
-| PoH / block | hashes per tick / ticks per slot | `62,500` / `64` | 8.4 |
+| PoH / block | hashes per tick / bank tick-height interval / serialized tick Entries | absent / `64` / `1` | 8.4 |
+| PoH / block | Entry `num_hashes` / target slot duration | `1` / `200,000,000` nanoseconds | 8.4, 16.1 |
 | shred FEC | data / coding shreds per set | `32` / `32` | 9.1 |
-| shred slot | data-index / coding-index upper bound | each `< 32,768` | 9.2 |
-| shred slot | maximum data shreds / coding shreds | `32,768` / `32,768` | 9.2, 10.4.2 |
-| shred slot | maximum FEC sets | `1,024` | 9.2, 10.4.2 |
+| shred slot | data-index / coding-index upper bound | each `< 16,384` | 9.2 |
+| shred slot | maximum data shreds / coding shreds | `16,384` / `16,384` | 9.2, 10.4.2 |
+| shred slot | maximum FEC sets | `512` | 9.2, 10.4.2 |
 | shred wire | chained data / coding payload length | `1,203` / `1,228` bytes | 9.3 |
 | shred Merkle | proof entries in a 64-shred FEC set | `6` entries of `20` bytes | 9.3–9.4 |
 | shred data | ledger capacity without/with retransmitter trailer | `963` / `899` bytes | 9.3 |
 | shred recovery | mutually consistent shards required | `32` of `64` | 9.5 |
-| ledger framing | maximum DATA_COMPLETE components | `1,024` | 9.6 |
-| block production | aggregate transaction cost | `100,000,000` cost units | 10.4.2 |
-| block production | cost attributed to one writable account | `40,000,000` cost units | 10.4.2 |
-| block production | statically requested account allocation | `100,000,000` bytes | 10.4.2 |
+| ledger framing | maximum DATA_COMPLETE components / serialized Entry bytes | `512` / `10,485,760` bytes | 9.6 |
+| block production | aggregate transaction cost | `50,000,000` cost units | 10.4.2 |
+| block production | cost attributed to one writable account | `20,000,000` cost units | 10.4.2 |
+| block production | statically requested account allocation | `50,000,000` bytes | 10.4.2 |
 | block cost model | loaded-account page and charge | `32,768` bytes / `8` cost units | 10.4.1 |
 | block cost model | transaction signature / requested write lock | `720` / `300` cost units | 10.4.1 |
 | block cost model | secp256k1 / Ed25519 / secp256r1 precompile signature | `6,690` / `2,400` / `4,800` cost units | 10.4.1 |
@@ -5167,15 +5508,20 @@ informative active liveness profile; they are not block-validity limits.
 | bounded sysvar | SlotHistory window | `1,048,576` slots | 13.4 |
 | accounts commitment | lattice elements | `1,024` `u16` values | 14.4 |
 | accounts commitment | lattice serialization | `2,048` bytes | 14.4 |
-| Tower | stored votes / initial lockout base | `31` / `2` | 15.2 |
-| Tower | vote-threshold depth / threshold | `8` / strict `> 2/3` | 15.3 |
-| Tower | switch / duplicate / propagation threshold | strict `> 0.38` / `> trunc_u64(f64(total stake) * f64_bits(0x3fe0a3d70a3d70a4))` / `> 1/3` | 15.4, 15.6–15.7 |
-| epoch | target slot duration / slots per year | `400,000,000` nanoseconds / `78,892,314.984` slots | 16.1, 16.6.2 |
+| Alpenglow | Notar, Notar-fallback, Skip, and Finalize threshold | `>=60%` admitted stake | 15.3 |
+| Alpenglow | Fast-finalize threshold | `>=80%` admitted stake | 15.3 |
+| Alpenglow | safe-to-notar / safe-to-skip thresholds | Section 15.5 exact `20%`, `40%`, and `60%` predicates | 15.5 |
+| Alpenglow | Notar-fallback targets per validator / certified blocks per slot | `3` / `4` | 15.3, 15.5 |
+| Alpenglow | leader window / reward-certificate delay | `4` / `8` slots | 15.4, 16.6.3 |
+| Alpenglow | nominal handover / per-slot allowance | `400` / `200` milliseconds | 15.9 |
+| epoch | target slot duration / slots per year | `200,000,000` nanoseconds / `157,784,629.968` slots | 16.1, 16.6.2 |
 | epoch | normal slots / consecutive leader slots | `432,000` / `4` | 16.1, 16.3 |
 | inflation | initial / terminal rate / taper | `8%` / `1.5%` / `15%` | 16.6.2 |
+| inflation | state address / epoch-`E` data length | `3vJzniWALu2qGFJ1ZY6JD3Y2ZmA5zWqmVdDX7yBXHgu7` / `49` bytes | 16.6.2 |
+| inflation | epoch-1072 / epoch-1071 reward budget | `62,395,745,304,053` / `62,417,544,028,268` lamports | 16.6.2 |
 | rewards | admitted vote accounts | `2,000` | 16.6.1 |
-| rewards | stake updates per produced block | `4,096` | 16.6.5 |
-| rewards | distribution span | `43,200` produced blocks | 16.6.5 |
+| rewards | stake updates per produced block | `2,048` accounts | 16.6.5 |
+| rewards | maximum distribution span | `43,200` produced blocks | 16.6.5 |
 | feature state | minimum Feature-account data | `9` bytes | 17.1 |
 | hard-fork state | registered Mainnet hard forks at `E` | `9` registrations | 17.5 |
 
@@ -5195,19 +5541,19 @@ This appendix indexes authoritative tables rather than redefining them.
 | Shred signature/version/variant failure | 9 | Drop or mark shred invalid; do not use for reconstruction |
 | Incomplete erasure set | 9 | Retain/repair; not a complete slot |
 | Entry PoH failure | 8/10 | Reject entry sequence; candidate slot is not votable |
-| Duplicate block version | 9/10/15 | Enter duplicate state machine; retain proof/repair evidence |
-| Vote locked out or threshold failure | 15 | Abstain; block validity unchanged |
+| Competing block ID | 9/10/15 | Keep versions separate; verify the exact certificate; repair and replay before use |
+| Unsafe vote or certificate threshold failure | 15 | Abstain or reject the certificate; block validity is unchanged |
 
 # Appendix C — Mainnet feature manifest
 
 The
-[Solana Improvement Documents repository](https://github.com/solana-foundation/solana-improvement-documents/tree/3b02766490b408294bb21a8da2ac30ccb30269e2)
+[Solana Improvement Documents repository](https://github.com/solana-foundation/solana-improvement-documents/tree/4f80d8a6938f86b9394e792253a2a52e01346314)
 defines the proposal process and source documents. Governance activity is available
 through the [Solana validator-governance site](https://governance.solana.com/). This
 appendix lists every feature account active in the Mainnet configuration at reference
 epoch `E`; features not active by `E` are outside this specification.
 
-**Informative table. Complete active Mainnet feature manifest at `E = 1015`.**
+**Informative table. Complete active Mainnet feature manifest at `E = 1072`.**
 
 | Feature address | Protocol selector | Activation epoch | Brief effect | Relevant SIMD | Classification |
 |---|---|---:|---|---|---|
@@ -5481,7 +5827,7 @@ epoch `E`; features not active by `E` are outside this specification.
 | `bn2puAyxUx6JUabAxYdKdJ5QHbNNmKw8dCGuGCyRrFN` | `fix_alt_bn128_multiplication_input_length` | `836` | fix alt_bn128 multiplication input length. | [SIMD-0222](https://github.com/solana-foundation/solana-improvement-documents/blob/3b02766490b408294bb21a8da2ac30ccb30269e2/proposals/0222-fix-alt-bn128-multiplication-length-check.md) | Consensus/state |
 | `bnYzodLwmybj7e1HAe98yZrdJTd7we69eMMLgCXqKZm` | `fix_alt_bn128_pairing_length_check` | `942` | Fix alt_bn128_pairing length check. | [SIMD-0334](https://github.com/solana-foundation/solana-improvement-documents/blob/3b02766490b408294bb21a8da2ac30ccb30269e2/proposals/0334-fix-alt-bn128-pairing-length-check.md) | Consensus/state |
 | `decoMktMcnmiq6t3u7g5BfgcQu91nKZr6RvMYf9z1Jb` | `allow_commission_decrease_at_any_time` | `704` | Allow commission decrease at any time in epoch. | [SIMD-0079](https://github.com/solana-foundation/solana-improvement-documents/blob/3b02766490b408294bb21a8da2ac30ccb30269e2/proposals/0079-allow_commission_decrease_at_any_time.md) | Consensus/state |
-| `disCA4efguFL6Wqa4pGdG7jpjC7C5uiKzKnhEBqchBe` | `discard_unexpected_data_complete_shreds` | `1005` | Markers for Alpenglow Fast Leader Handover, DATA_COMPLETE_SHRED placement rules. | [SIMD-0337](https://github.com/solana-foundation/solana-improvement-documents/blob/3b02766490b408294bb21a8da2ac30ccb30269e2/proposals/0337-parent-ready-update-marker.md) | Wire/interoperability |
+| `disCA4efguFL6Wqa4pGdG7jpjC7C5uiKzKnhEBqchBe` | `discard_unexpected_data_complete_shreds` | `1005` | Enforce DATA_COMPLETE placement and block-component framing. | [SIMD-0337](https://github.com/solana-foundation/solana-improvement-documents/blob/3b02766490b408294bb21a8da2ac30ccb30269e2/proposals/0337-parent-ready-update-marker.md) | Wire/interoperability |
 | `dupPajaLy2SSn8ko42aZz4mHANDNrLe8Nw8VQgFecLa` | `index_erasure_conflict_duplicate_proofs` | `603` | Generate duplicate proofs for index and erasure conflicts. | — | Wire/interoperability |
 | `eca6zf6JJRjQsYYPkBHF3N32MTzur4n2WL4QiiacPCL` | `curve25519_restrict_msm_length` | `607` | Restrict curve25519 multiscalar multiplication vector lengths. | — | Consensus/state |
 | `ed9tNscbWLYBooxWA7FE2B5KHWs8A6sxfY8EzezEcoo` | `ed25519_precompile_verify_strict` | `714` | Use strict verification in ed25519 precompile. | [SIMD-0152](https://github.com/solana-foundation/solana-improvement-documents/blob/3b02766490b408294bb21a8da2ac30ccb30269e2/proposals/0152-precompiles.md) | Consensus/state |
@@ -5511,6 +5857,17 @@ epoch `E`; features not active by `E` are outside this specification.
 | `zkdoVwnSFnSLtGJG7irJPEYUpmb4i7sGMGcnN6T9rnC` | `disable_zk_elgamal_proof_program` | `805` | Disables zk-elgamal-proof program. | — | Consensus/state |
 | `zkexuyPRdyTVbZqEAREueqL2xvvoBhRgth9xGSc1tMN` | `reenable_zk_elgamal_proof_program` | `982` | Re-enables zk-elgamal-proof program. | — | Consensus/state |
 | `zkhiy5oLowR7HY4zogXjCjeMXyruLqBwSWH21qcFtnv` | `zk_elgamal_proof_program_enabled` | `731` | Enable ZkElGamalProof program. | [SIMD-0153](https://github.com/solana-foundation/solana-improvement-documents/blob/3b02766490b408294bb21a8da2ac30ccb30269e2/proposals/0153-elgamal-proof-program.md) | Consensus/state |
+| `iBRL5RuWhw4yqaAZu96RUULHckHTZAoe2b77qaV38JZ` | `reduce_slot_time_to_350ms` | `1019` | Select the 350-ms slot profile from epoch 1020. | [SIMD-0525](https://github.com/solana-foundation/solana-improvement-documents/blob/4f80d8a6938f86b9394e792253a2a52e01346314/proposals/0525-reduce-slot-times.md) | Consensus/state |
+| `iBRLL3k18HST852F1Mf3Lv83waTNQmmqvKDxvYGwQFL` | `reduce_slot_time_to_300ms` | `1023` | Select the 300-ms slot profile from epoch 1024. | [SIMD-0525](https://github.com/solana-foundation/solana-improvement-documents/blob/4f80d8a6938f86b9394e792253a2a52e01346314/proposals/0525-reduce-slot-times.md) | Consensus/state |
+| `s51VGwCAgebo2745DSUris72RavoLkXGUmVJosESCXr` | `upgrade_bpf_stake_program_to_v5_1` | `1026` | Upgrade Stake Core-BPF to v5.1 and use fixed-point warmup/cooldown. | [SIMD-0391](https://github.com/solana-foundation/solana-improvement-documents/blob/4f80d8a6938f86b9394e792253a2a52e01346314/proposals/0391-replace-stake-program-floating-point.md) | Consensus/state |
+| `BY4JhHLahVzS9ynfDz4exzGPbVXhFmJvEyMWsXbDBqME` | `relax_post_exec_min_balance_check` | `1027` | Permit a pre-existing rent-paying account to remain rent-paying after execution. | [SIMD-0392](https://github.com/solana-foundation/solana-improvement-documents/blob/4f80d8a6938f86b9394e792253a2a52e01346314/proposals/0392-rent-increase-adaptations.md) | Consensus/state |
+| `4a6f7o7iTcA8hRDCrPLkSatnt5Ykxiu36wo5p1Tt12wC` | `set_lamports_per_byte_to_6333` | `1028` | Set rent to 6,333 lamports per byte-year. | [SIMD-0437](https://github.com/solana-foundation/solana-improvement-documents/blob/4f80d8a6938f86b9394e792253a2a52e01346314/proposals/0437-incremental-rent-reduction.md) | Consensus/state |
+| `3HcSrCTGXTUnrTueHi4DAwNuMxZSsm5xui2Ax3mgxHqf` | `custom_commission_collector` | `1031` | Enable separate block-revenue and inflation commission collectors. | [SIMD-0232](https://github.com/solana-foundation/solana-improvement-documents/blob/4f80d8a6938f86b9394e792253a2a52e01346314/proposals/0232-custom-commission-collector.md) | Consensus/state |
+| `61BtM7BkDEE8Yq5fskEVAQT9mYA8qCejJWoLe5apqg81` | `set_lamports_per_byte_to_5080` | `1033` | Set the current rent value to 5,080 lamports per byte-year. | [SIMD-0437](https://github.com/solana-foundation/solana-improvement-documents/blob/4f80d8a6938f86b9394e792253a2a52e01346314/proposals/0437-incremental-rent-reduction.md) | Consensus/state |
+| `txv1aq4pp281K9um3tnPgkfX8UqtFT6wcVW3hNezGLL` | `enable_tx_v1` | `1035` | Enable the bounded version-1 transaction codec. | [SIMD-0385](https://github.com/solana-foundation/solana-improvement-documents/blob/4f80d8a6938f86b9394e792253a2a52e01346314/proposals/0385-transaction-v1.md) | Wire/interoperability |
+| `iBRLMc81UjRa8fn8A6eE8bJTnRbgQoPTynM51akENCV` | `reduce_slot_time_to_250ms` | `1036` | Select the 250-ms slot profile from epoch 1037. | [SIMD-0525](https://github.com/solana-foundation/solana-improvement-documents/blob/4f80d8a6938f86b9394e792253a2a52e01346314/proposals/0525-reduce-slot-times.md) | Consensus/state |
+| `iBRLjhJnkmDZgNoZRDMW11d8ZV7HvsL3vAyRjZB5npW` | `reduce_slot_time_to_200ms` | `1052` | Select the current 200-ms slot profile from epoch 1053. | [SIMD-0525](https://github.com/solana-foundation/solana-improvement-documents/blob/4f80d8a6938f86b9394e792253a2a52e01346314/proposals/0525-reduce-slot-times.md) | Consensus/state |
+| `A1pengvuM6JEcyNuTnMqepBKhwHE3N6PmUrdATGawhJS` | `alpenglow` | `1064` | Enable Alpenglow block markers, votes, certificates, rewards, and finality. | [SIMD-0326](https://github.com/solana-foundation/solana-improvement-documents/blob/4f80d8a6938f86b9394e792253a2a52e01346314/proposals/0326-alpenglow.md) | Consensus/state |
 
 [SOL-FTR-0011] Every Appendix C address **MUST** be treated as active from its stated
 activation epoch when decoding Feature state. A `Consensus/state` or
@@ -5520,10 +5877,9 @@ mechanism, and a `Resolved historical selector` has no live branch in epoch `E`;
 enduring result is already incorporated in the current normative rules. A selector
 absent from Appendix C **MUST NOT** select epoch-`E` behavior.
 
-[SOL-FTR-0012] The active `validator_admission_ticket` selector **MUST NOT** deduct
-lamports from vote accounts or credit the incinerator in epoch `E`, because that
-transition also requires the `alpenglow` selector, which is absent from the epoch-`E`
-active feature manifest.
+[SOL-FTR-0012] The active `validator_admission_ticket` and `alpenglow` selectors
+**MUST** apply the admission filter and `800,000,000`-lamport per-epoch burn in Section
+16.6.1.
 
 # Appendix D — Source references
 
@@ -5534,10 +5890,10 @@ specification and do not override a numbered protocol requirement.
 
 | Reference | Exact commit | Principal surfaces |
 |---|---|---|
-| [Agave](https://github.com/anza-xyz/agave/tree/ac82b5d438b0c2303dc7169f52c748977713a111) | `ac82b5d438b0c2303dc7169f52c748977713a111` | Bank/SVM/runtime, consensus, wire, ledger, feature set, and migration research |
-| [Firedancer](https://github.com/firedancer-io/firedancer/tree/1c898b7ebe53b67cadff06eb74aa3c839068f39a) | `1c898b7ebe53b67cadff06eb74aa3c839068f39a` | Independent wire, shred, PoH, VM, hashing, and fork-choice research |
+| [Agave v4.3.2](https://github.com/anza-xyz/agave/tree/a203300045b405f86c9c84308b2eae76af69ac3b) | `a203300045b405f86c9c84308b2eae76af69ac3b` | Bank/SVM/runtime, Alpenglow consensus and transport, transaction v1, wire, ledger, and feature set |
+| [Firedancer v26.10.5](https://github.com/firedancer-io/firedancer/tree/6286f99e400c1d5ac6f95b8cf36491555faa3726) | `6286f99e400c1d5ac6f95b8cf36491555faa3726` | Independent Alpenglow wire/state, block markers, transaction v1, shred, PoH, VM, and hashing evidence |
 | [SBF implementation](https://github.com/anza-xyz/sbpf/tree/9476336b901181d68e00c5b38252a15694d4d6aa) | `9476336b901181d68e00c5b38252a15694d4d6aa` | Evidence used to inline the V0–V3 ISA, verifier, ELF, call, and memory rules; not a normative dependency |
-| [SIMD repository](https://github.com/solana-foundation/solana-improvement-documents/tree/3b02766490b408294bb21a8da2ac30ccb30269e2) | `3b02766490b408294bb21a8da2ac30ccb30269e2` | Proposal text, activation intent, and feature identifiers linked from Appendix C |
+| [SIMD repository](https://github.com/solana-foundation/solana-improvement-documents/tree/4f80d8a6938f86b9394e792253a2a52e01346314) | `4f80d8a6938f86b9394e792253a2a52e01346314` | Proposal text, activation intent, and feature identifiers linked from Appendix C |
 | [Legacy Solana](https://github.com/solana-labs/solana/tree/cca16a815dbc41c806d198ffdd2943e3c38c6a75) | `cca16a815dbc41c806d198ffdd2943e3c38c6a75` | Historical protocol-program and wire behavior still active in `E` |
-| [Stake Core-BPF program](https://github.com/solana-program/stake/tree/8f81ee29c7688c8a9c4a7a2c68b5f349b9cbb144) | `8f81ee29c7688c8a9c4a7a2c68b5f349b9cbb144` | Stake Program v5 executable behavior and interface research |
+| [Stake Core-BPF program v5.1.0](https://github.com/solana-program/stake/tree/3b511b63093618bf12493728e416fc647cb19e5b) | `3b511b63093618bf12493728e416fc647cb19e5b` | Stake Program v5.1 executable behavior and fixed-point stake-arithmetic research |
 | [RFC 9669](https://www.rfc-editor.org/rfc/rfc9669.html) | N/A | Base BPF instruction-set semantics, subject to the SBF modifications in Section 12.8 |
