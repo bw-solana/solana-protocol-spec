@@ -1,0 +1,18 @@
+[book]
+title = "Solana Protocol Specification"
+description = "Forward-conformance specification for the Solana Mainnet protocol"
+language = "en"
+src = "src"
+
+[build]
+build-dir = "book"
+create-missing = false
+
+[output.html]
+git-repository-url = "https://github.com/bw-solana/solana-protocol-spec"
+edit-url-template = "https://github.com/bw-solana/solana-protocol-spec/edit/master/{path}"
+site-url = "/solana-protocol-spec/"
+additional-css = ["theme/wide-tables.css"]
+
+[output.html.print]
+enable = true

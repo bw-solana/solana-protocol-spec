@@ -1,0 +1,41 @@
+/* Keep prose at mdBook's readable measure while allowing tables to use the
+ * available content pane. Tables that still exceed the pane remain
+ * horizontally scrollable through mdBook's .table-wrapper behavior. */
+:root {
+    --wide-table-max-width: 1400px;
+}
+
+.content .table-wrapper {
+    width: min(
+        var(--wide-table-max-width),
+        calc(
+            100vw - var(--page-padding) - var(--page-padding) - 10px
+        )
+    );
+    margin-inline-start: 50%;
+    transform: translateX(-50%);
+}
+
+/* On non-overlay layouts, reserve space for an open, resizable sidebar. */
+@media only screen and (min-width: 620px) {
+    #mdbook-sidebar-toggle-anchor:checked ~ .page-wrapper .content .table-wrapper {
+        width: min(
+            var(--wide-table-max-width),
+            calc(
+                100vw - var(--sidebar-width) -
+                var(--sidebar-resize-indicator-width) -
+                var(--page-padding) - var(--page-padding) - 10px
+            )
+        );
+    }
+}
+
+/* Do not carry the screen-only breakout into the printable specification. */
+@media print {
+    .content .table-wrapper {
+        width: 100%;
+        margin-inline-start: 0;
+        overflow-x: visible;
+        transform: none;
+    }
+}
