@@ -141,7 +141,7 @@ epoch `E`; features not active by `E` are outside this specification.
 | `BTWmtJC8U5ZLMbBUUA1k6As62sYjPEjAiNAT55xYGdJU` | `revise_turbine_epoch_stakes` | `567` | Revise turbine epoch stakes. | — | Wire/interoperability |
 | `BUS12ciZ5gCoFafUHWW8qaFMMtwFQGVxjsDheWLdqBE2` | `credits_auto_rewind` | `464` | Auto rewind stake's credits_observed if (accidental) vote recreation is detected. | — | Consensus/state |
 | `BcWknVcgvonN8sL4HE4XFuEVgfcee5MwxWPAgP6ZV89X` | `vote_stake_checked_instructions` | `214` | Vote/state program checked instructions. | — | Consensus/state |
-| `Bfqm7fGk5MBptqa2WHXWFLH7uJvq8hkJcAQPipy2bAMk` | `warp_testnet_timestamp` | `141` | Applies the warp testnet timestamp protocol change. | — | Resolved historical selector |
+| `Bfqm7fGk5MBptqa2WHXWFLH7uJvq8hkJcAQPipy2bAMk` | `warp_timestamp` | `141` | Warp timestamp to current, adjust bounding to 50%. | — | Resolved historical selector |
 | `BiCU7M5w8ZCMykVSyhZ7Q3m2SWoR2qrEQ86ERcDX77ME` | `nonce_must_be_writable` | `317` | Nonce must be writable. | — | Consensus/state |
 | `BiNjYd8jCYDgAwMqP91uwZs6skWpuHtKrZbckuKESs8N` | `prevent_upgrade_and_invoke` | `145` | Prevents upgrade and invoke. | — | Resolved historical selector |
 | `Bj2jmUsM2iRhfdLLDSTkhM5UQRQvQHm57HSmPibPtEyu` | `clean_up_delegation_errors` | `490` | Return InsufficientDelegation instead of InsufficientFunds or InsufficientStake where applicable. | — | Consensus/state |
@@ -251,7 +251,7 @@ epoch `E`; features not active by `E` are outside this specification.
 | `Hr1nUA9b7NJ6eChS26o7Vi8gYYDDwWD3YeBfzJkTbU86` | `enable_request_heap_frame_ix` | `503` | Enable transaction to request heap frame using compute budget instruction. | — | Consensus/state |
 | `Hrg5bXePPGiAVWZfDHbvjqytSeyBDPAGAQ7v6N5i4gCX` | `cpi_data_cost` | `176` | Applies the CPI data cost protocol change. | — | Resolved historical selector |
 | `HxrEu1gXuH7iD3Puua1ohd5n4iUKJyFNtNxk9DVJkvgr` | `nonce_must_be_authorized` | `320` | Nonce must be authorized. | — | Consensus/state |
-| `HxvjqDSiF5sYdSYuCXsUnS8UeAoWsMT9iGoFP8pgV1mB` | `compute_budget_balancing` | `97` | Applies the compute budget balancing protocol change. | — | Resolved historical selector |
+| `HxvjqDSiF5sYdSYuCXsUnS8UeAoWsMT9iGoFP8pgV1mB` | `bpf_compute_budget_balancing` | `97` | Applies the compute budget balancing protocol change. | — | Resolved historical selector |
 | `HyrbKftCdJ5CrUfEti6x26Cj7rZLNe32weugk7tLcWb8` | `syscall_saturated_math` | `349` | Syscalls use saturated math. | — | Consensus/state |
 | `J2QdYx8crLbTVK8nur1jeLsmc3krDbfjoxoea2V1Uy5Q` | `default_units_per_instruction` | `327` | Default max tx-wide compute units calculated per instruction. | — | Consensus/state |
 | `J4HFT8usBxpcF63y46t1upYobJgChmKyZPm5uTBRg25Z` | `enable_program_redeployment_cooldown` | `530` | Enable program redeployment cooldown. | — | Consensus/state |
