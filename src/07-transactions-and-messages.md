@@ -344,9 +344,11 @@ in a width that cannot overflow the product and saturated to `u64::MAX`.
 
 [SOL-TXN-0022] The signature fee **MUST** count the transaction's required signatures
 plus the signature operations declared by each active signature-verification precompile,
-and **MUST** multiply that count by the lamports-per-signature value associated with the
-accepted recent blockhash, or by the nonce account's stored fee rate for a durable-nonce
-transaction, using saturating `u64` arithmetic.
+and **MUST** multiply that count by the fixed protocol rate of `5,000` lamports per
+signature, using saturating `u64` arithmetic. The lamports-per-signature value recorded
+with the accepted recent blockhash and the fee rate stored in a durable-nonce account
+**MUST NOT** affect the fee; the recent blockhash and the nonce account serve only as
+age and validity checks.
 
 [SOL-TXN-0023] The charged transaction fee **MUST** be the saturating sum of the
 signature fee and prioritization fee; its collection and later distribution **MUST**
