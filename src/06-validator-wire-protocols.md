@@ -82,7 +82,7 @@ little-endian discriminant and its payload. Its cached identity is not serialize
 | `8` | NodeInstance: zero bytes | known tag; payload decode fails | unreachable | unavailable; no duplicate transition | no | no |
 | `9` | `index:u16`, then `DuplicateShred` | accept | require `index < 512` and valid chunk metadata | accept if comparison wins | yes | yes |
 | `10` | `SnapshotHashes` | accept | require valid bounded hash lists | accept if comparison wins | yes | yes |
-| `11` | `ContactInfo` | accept | require Section 6.5 validity | accept if comparison wins | yes | yes |
+| `11` | `ContactInfo` | accept | require SOL-WIR-0013 whole-value validity; invalid endpoints are treated as absent; gossip-endpoint reachability is local policy | accept if comparison wins | yes | yes |
 | `12` | `RestartLastVotedForkSlots` below | accept | require valid bounded fields | accept if comparison wins | only during a coordinated restart | no |
 | `13` | `RestartHeaviestFork` below | accept | require valid bounded fields | accept if comparison wins | only during a coordinated restart | no |
 
@@ -326,9 +326,18 @@ the endpoint.
 | `13` | Alpenglow votor QUIC | active; QUIC DATAGRAM consensus messages |
 
 [SOL-WIR-0013] A valid ContactInfo **MUST** contain only unique IPv4 addresses and
-unique socket keys, every socket index **MUST** be in range, and every address **MUST**
-be referenced. Port addition **MUST NOT** overflow; port zero, unspecified, multicast,
-and IPv6 endpoints **MUST** be rejected.
+unique socket keys; any IPv6 address in the address list makes it invalid, whether or
+not a socket references it. Every socket index **MUST** be in range, every address
+**MUST** be referenced, and the running port sum **MUST NOT** overflow `u16`. An
+endpoint whose port is zero, or whose address is unspecified or multicast, does not
+invalidate the ContactInfo. Such an endpoint **MUST** be treated as absent for every
+service lookup, and the ContactInfo **MUST** still be stored and relayed with its
+original signed bytes. Push and pull-response ingress **MUST** discard a ContactInfo
+whose gossip endpoint (key `0`) is absent or treated as absent. A receiver **MAY** also
+discard, as local policy, a ContactInfo whose gossip endpoint lies outside its
+configured address space (for example a private or loopback address on a public cluster)
+or has not answered a recent Ping (Section 6.4); such a value may be accepted once the
+endpoint answers.
 
 [SOL-WIR-0014] ContactInfo `wallclock` **MUST** be less than `10^15`. A peer used for
 Turbine or repair **MUST** advertise shred version `50093`. Unknown extension types
