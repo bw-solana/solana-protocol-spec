@@ -489,10 +489,12 @@ predicate order shown above.
 
 The Native Loader address is a reserved dispatch owner, not a general-purpose
 instruction program. Directly invoking it returns `UnsupportedProgramId`. A
-Native-Loader-owned program account dispatches only when its key is in the bank's
-builtin registry; an unregistered key produces
-`TransactionError::InvalidProgramForExecution` during loading. The program's own
-instruction accounts exclude the loader-owner account.
+Native-Loader-owned program account passes the loading-time owner check of SOL-TXN-0029
+and dispatches only when its key is in the bank's builtin registry. An unregistered key
+produces `TransactionError::InstructionError(i, InstructionError::UnsupportedProgramId)`
+when instruction `i` is invoked, before any builtin code runs. Instructions before `i`
+still execute, but the transaction ends in the fee-only rollback of SOL-TXN-0030. The
+program's own instruction accounts exclude the loader-owner account.
 
 The deprecated and current BPF loaders may execute already-deployed program accounts
 using ABI v0 and v1 respectively, but direct management instructions return
