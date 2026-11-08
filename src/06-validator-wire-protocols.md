@@ -222,14 +222,18 @@ to the first nine unpruned peers. There are 25 buckets. For stake `s` lamports d
 `b(s)=min(24, bit_length(floor(s/1,000,000,000)))`; a value owned by `o` uses bucket
 `min(b(local_stake),b(stake(o)))`. Peer sampling is without replacement with weight
 `(min(peer_bucket,bucket)+1)^2`; zero-weight peers follow positive-weight peers. A valid
-Prune applies only at its named destination, only within `500 ms` of local time, and
-marks each named origin as suppressed for pushes to the prune sender in the applicable
-bucket. A node's own values are never suppressed by a prune false positive.
+Prune applies only at its named destination, only if its wallclock is no more than
+`500 ms` before local time, and marks each named origin as suppressed for pushes to the
+prune sender in the applicable bucket. A node's own values are never suppressed by a
+prune false positive.
 
-[SOL-WIR-0010] A sender **MUST** honor authenticated, timely prune state. Active-set
-size, stake buckets, sampling, rotation timing, and fanout cap are informative liveness
-policy. A sender **MUST NOT** send a value to a peer for which the applicable prune
-filter positively contains that origin, except its own origin as stated above.
+[SOL-WIR-0010] A prune is timely at a receiver whose local millisecond clock reads `now`
+iff `now <= wallclock + 500`; a future wallclock is bounded only by `SOL-WIR-0012`. A
+sender **MUST** honor authenticated, timely prune state addressed to it and **MUST NOT**
+apply a prune whose destination is not its own key. Active-set size, stake buckets,
+sampling, rotation timing, and fanout cap are informative liveness policy. A sender
+**MUST NOT** send a value to a peer for which the applicable prune filter positively
+contains that origin, except its own origin as stated above.
 
 ## 6.4 Ping, pong, and prune
 
