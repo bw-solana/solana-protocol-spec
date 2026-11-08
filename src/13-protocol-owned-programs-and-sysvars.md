@@ -271,11 +271,21 @@ Vote-instruction discriminant is invalid instruction data.
 | `11` | AuthorizeCheckedWithSeed | authority-kind, `derived_owner[32], seed:string`; new authority is an instruction account signer |
 | `14` | TowerSync | compact tower shown below |
 | `15` | TowerSyncSwitch | compact tower, then `switch_proof_hash[32]` |
+| `17` | UpdateCommissionCollector | `commission_kind:u32`; kind `0` sets the inflation-rewards collector and kind `1` sets the block-revenue collector |
 | `18` | UpdateCommissionBps | `commission_bps:u16, commission_kind:u32`; kind `0` is inflation rewards, and other kinds are unavailable in epoch `E` |
 
 Authority-kind is `LE(0,4)` for a voter, `LE(1,4)` for a withdrawer, or
 `LE(2,4) || bls_key[48] || proof_of_possession[96]` for a BLS voter. A seed string uses
 `length:u64 || UTF-8 bytes` and is at most 32 bytes.
+
+UpdateCommissionCollector requires at least three instruction accounts (`[0]` the vote
+account, `[1]` the new collector, `[2]` the authorized withdrawer) and the authorized
+withdrawer's signature. If account `1` is the vote account, the vote address is stored.
+Otherwise account `1` must be owned by the System Program (else `InvalidAccountOwner`),
+rent-exempt at its current data length under the Rent sysvar (else `InsufficientFunds`),
+and writable in this instruction (else `InvalidArgument`), checked in that order after the
+signature check. Its address is written to the collector field the kind selects; both
+kinds are accepted in epoch `E`.
 
 **Normative table.**
 
