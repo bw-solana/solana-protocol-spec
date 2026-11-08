@@ -24,7 +24,7 @@ informative active liveness profile; they are not block-validity limits.
 | gossip | push/contact wallclock window | `±15,000` milliseconds | 6.2 |
 | gossip | pull caller window / random future jitter | `[-15,000,+15,000)` / `0..3,750` milliseconds | 6.2 |
 | gossip | default origin timeout / rejected-hash retention | `15,000` / `20,000` milliseconds | 6.2 |
-| gossip | prune wallclock window | `±500` milliseconds | 6.2 |
+| gossip | prune wallclock window | `500` milliseconds (past only; `now <= wallclock + 500`) | 6.2 |
 | gossip | slots in one `CompressedSlots` value | `< 16,384` | 6.3 |
 | gossip | incremental snapshot hashes | `25` | 6.3 |
 | gossip | pruned keys in one Prune message | `32` | 6.4 |
