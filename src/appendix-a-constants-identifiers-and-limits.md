@@ -31,7 +31,7 @@ informative active liveness profile; they are not block-validity limits.
 | gossip push | peers per bucket / sends per value / stake buckets | `12` / `9` / `25` | 6.3.1 |
 | QUIC/TLS | TLS version / ALPN | TLS `1.3` / `solana-tpu` | 6.6 |
 | QUIC/TLS | generated certificate length / public-key bytes | `249` / `32` bytes | 6.6 |
-| TPU QUIC | one transaction stream / connection receive window | `1..=4,096` / `8,388,608` bytes | 6.6 |
+| TPU QUIC | one transaction stream / connection receive window | `1..=4,096` (TPU, TPU-forward) or `1..=1,232` (TPU-vote) / `8,388,608` bytes | 6.6 |
 | QUIC | inbound unidirectional streams after stake/RTT scaling | unstaked `128..=896`; staked `128..=3,584` | 6.6 |
 | QUIC | idle / handshake / incomplete-stream timeout | `30` / `2` / `2` seconds | 6.6 |
 | QUIC | admitted connections | `2,000` staked plus `2,000` unstaked | 6.6 |

@@ -342,10 +342,11 @@ accept transaction application data through ContactInfo keys 5 or 6. A TPU-vote 
 datagram contains exactly one Chapter 7 transaction with no application framing. A TPU,
 TPU-forward, or TPU-vote QUIC connection **MUST** negotiate the ten-byte ALPN
 `solana-tpu`, and each completed requester-initiated unidirectional stream **MUST**
-contain exactly one transaction. The stream is nonempty, consumes all bytes, and is at
-most 4,096 bytes. Chapter 7 then applies the format-specific transaction limit: 1,232
-bytes for legacy and version 0, or 4,096 bytes for version 1. The UDP form remains
-limited to 1,232 bytes by Section 6.1.
+contain exactly one transaction. The stream is nonempty and consumes all bytes. On TPU
+and TPU-forward it is at most 4,096 bytes; on TPU-vote it is at most 1,232 bytes, and a
+longer TPU-vote stream is an invalid stream (close code `5`). Chapter 7 then applies the
+format-specific transaction limit: 1,232 bytes for legacy and version 0, or 4,096 bytes
+for version 1. The UDP form remains limited to 1,232 bytes by Section 6.1.
 
 [SOL-WIR-0016] A TPU receiver **MUST** pass only QUIC's ordered, reassembled bytes from
 one completed unidirectional stream to the transaction decoder. It **MUST** reject a
@@ -362,7 +363,7 @@ transaction; Chapter 7 signatures do.
 | Key exchange | X25519 |
 | TLS 1.3 cipher suites | accept AES-128-GCM-SHA256, AES-256-GCM-SHA384, and ChaCha20-Poly1305-SHA256 |
 | ALPN | exactly `solana-tpu` |
-| Per-stream receive window and application hard cap | `4,096` bytes |
+| Per-stream receive window and application hard cap | `4,096` bytes (TPU, TPU-forward); `1,232` bytes (TPU-vote) |
 | Connection receive window | `8,388,608` bytes |
 | Initial bidirectional-stream limit | `0` |
 | Initial unidirectional-stream limit | `0`, raised after handshake/QoS classification |
@@ -451,8 +452,8 @@ transport completion.
 
 Repair and TVU use UDP in epoch `E`; their recognized QUIC socket keys do not select
 this TPU ALPN or transaction stream grammar. TPU, TPU-forward, and TPU-vote QUIC differ
-only in advertised endpoint and downstream transaction classification. TPU-vote
-additionally accepts the UDP form above.
+only in advertised endpoint, per-stream size cap, and downstream transaction
+classification. TPU-vote additionally accepts the UDP form above.
 
 ### 6.6.1 Alpenglow votor QUIC datagrams
 
