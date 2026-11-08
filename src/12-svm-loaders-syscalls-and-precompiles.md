@@ -53,7 +53,9 @@ predicate.
 
 [SOL-SVM-0004] A native-loader-owned program **MUST** dispatch to the builtin registered
 for that exact program identifier, while a supported BPF-loader-owned program **MUST**
-dispatch through its loader and the bank-selected SBF environment.
+dispatch through its loader and the bank-selected SBF environment. A native-loader-owned
+identifier with no registered builtin **MUST** fail with `UnsupportedProgramId` when
+invoked, before any program code runs.
 
 [SOL-SVM-0005] `ResolveProgram` **MUST** depend only on the invoking bank's account
 state, program identifier, invoking slot, and feature activation history, and **MUST**

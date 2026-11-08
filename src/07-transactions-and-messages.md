@@ -378,10 +378,12 @@ exceeding the transaction's loaded-account-data limit **MUST** stop loading with
 native or SBF loader accepted by the protocol configuration. The account's legacy
 `executable` Boolean is not an invocation gate in epoch `E` and **MUST NOT** by itself
 cause `AccountNotExecutable` or `InvalidProgramForExecution`. A missing program account
-is `TransactionError::ProgramAccountNotFound`; an unsupported owner or invalid loader
-state is `TransactionError::InvalidProgramForExecution` during loading, or
+is `TransactionError::ProgramAccountNotFound`; an owner outside the active native/SBF
+loader set is `TransactionError::InvalidProgramForExecution` during loading. A
+native-loader-owned identifier absent from the builtin registry, or an SBF program whose
+loader state or bytes cannot be resolved for the invoking slot, passes loading and is
 `TransactionError::InstructionError(i, InstructionError::UnsupportedProgramId)` when
-program resolution first occurs for instruction `i`.
+instruction `i` is invoked.
 
 [SOL-TXN-0030] If failure occurs only after fee-payer deduction, including a
 post-deduction account-loading failure, the transaction **MUST** produce the fee-only
@@ -465,7 +467,7 @@ the execution path has used them.
 | `InstructionError(i,e)` | phase 10 or post-instruction validation; exact `e` is Section 12.7 | `P2` |
 | `InvalidAccountIndex` | phase 1 static message check | `P0` admission; `BF` replay |
 | `SignatureFailure` | phase 2 | `P0` admission; `BF` replay |
-| `InvalidProgramForExecution` | phase 9 owner/state check | `P1` |
+| `InvalidProgramForExecution` | phase 9 program-owner check | `P1` |
 | `SanitizeFailure` | phase 1 | `P0` admission; `BF` replay |
 | `WouldExceedMaxBlockCostLimit` | producer reservation or replay cost check | `P0` in production; `BF` in replay |
 | `UnsupportedVersion` | phase 1 | `P0` admission; `BF` replay |
