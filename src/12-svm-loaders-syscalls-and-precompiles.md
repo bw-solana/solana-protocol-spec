@@ -602,12 +602,14 @@ The V3 strict image has this program-header contract:
 | ELF class / data / OS ABI | ELF64 / little-endian / System V (`0`) |
 | ELF and header versions | current (`1`) |
 | program-header offset | immediately after the ELF64 file header |
-| program-header count | one executable header, optionally preceded by one read-only header |
+| program-header count | `e_phnum >= 1` and `e_phoff + 56*e_phnum <= file length`; if entry 0 has `p_flags == PF_R`, then `e_phnum >= 2`, entry 0 is the read-only header, and entry 1 is the bytecode header; otherwise entry 0 is the bytecode header; remaining entries up to `e_phnum` are not validated and not mapped |
 | read-only header | `PT_LOAD`, flags `PF_R`, virtual and physical address `0` |
 | bytecode header | `PT_LOAD`, flags `PF_X`, virtual and physical address `0x100000000` |
-| segment file offset | contiguous after the program-header table/preceding segment and divisible by 8 |
+| segment file offset | first checked segment starts at `64 + 56*e_phnum` (the end of the full table, including unchecked entries); each later checked segment follows the preceding one; divisible by 8 |
 | file and memory size | equal, in bounds, divisible by 8, and less than 4 GiB |
 | entry | inside bytecode segment and divisible by 8 |
+
+Only the read-only and bytecode headers named above are validated (SIMD-0189).
 
 The verifier rejects empty or non-eight-byte-multiple text, unknown opcodes, invalid
 registers, forbidden writes to `r10`, invalid immediate shift/endian/divisor values,
