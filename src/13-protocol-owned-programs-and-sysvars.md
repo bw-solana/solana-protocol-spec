@@ -93,7 +93,7 @@ instruction-data bytes after a complete variant.
 | Disc. | Instruction | Exact payload after discriminant | Required instruction accounts |
 |---:|---|---|---|
 | `0` | CreateAccount | `lamports:u64, space:u64, owner[32]` | `0` funding writable signer; `1` new writable signer |
-| `1` | Assign | `owner[32]` | `0` assigned writable signer |
+| `1` | Assign | `owner[32]` | `0` assigned account; writable and signer are required only when the owner changes |
 | `2` | Transfer | `lamports:u64` | `0` funding writable signer; `1` recipient writable |
 | `3` | CreateAccountWithSeed | `base[32], seed:string, lamports:u64, space:u64, owner[32]` | `0` funding writable signer; `1` created writable; the named base must be an instruction signer |
 | `4` | AdvanceNonceAccount | empty | `0` nonce writable; `1` RecentBlockhashes; `2` nonce-authority signer |
@@ -102,18 +102,26 @@ instruction-data bytes after a complete variant.
 | `7` | AuthorizeNonceAccount | `new_authority[32]` | `0` nonce writable; `1` current-authority signer |
 | `8` | Allocate | `space:u64` | `0` allocated writable signer |
 | `9` | AllocateWithSeed | `base[32], seed:string, space:u64, owner[32]` | `0` allocated writable; the named base must be an instruction signer |
-| `10` | AssignWithSeed | `base[32], seed:string, owner[32]` | `0` assigned writable; the named base must be an instruction signer |
+| `10` | AssignWithSeed | `base[32], seed:string, owner[32]` | `0` assigned account (writable required only when the owner changes); the named base must be an instruction signer when the owner changes |
 | `11` | TransferWithSeed | `lamports:u64, from_seed:string, from_owner[32]` | `0` funding writable; `1` base signer; `2` recipient writable |
 | `12` | UpgradeNonceAccount | empty | `0` nonce writable |
 | `13` | CreateAccountAllowPrefund | `lamports:u64, space:u64, owner[32]` | `0` new writable signer; if lamports is nonzero, `1` funding writable signer |
 
 For a seed-derived address, compute `SHA256(base[32] || seed_bytes || owner[32])`; the
 result must equal the address being allocated, assigned, created, or debited. Allocation
-requires a system-owned account with empty data and `space <= 10,485,760`; assignment
-requires empty data; a lamport transfer may debit only a system-owned account with empty
-data. CreateAccount additionally requires the destination balance to be zero.
+requires a system-owned account with empty data and `space <= 10,485,760`; a lamport
+transfer may debit only a system-owned account with empty data. CreateAccount
+additionally requires the destination balance to be zero.
 CreateAccountAllowPrefund omits only that zero-balance condition; all allocation,
 signer, derivation, funding, and assignment checks remain.
+
+After the account-count check and, for AssignWithSeed, the address derivation check,
+Assign and AssignWithSeed **MUST** succeed without further checks when the account's
+current owner already equals `owner`. Otherwise the signer requirement is checked first
+(`MissingRequiredSignature`). The account must then be owned by the System Program, be
+writable, and have data whose every byte is zero (any length, including 0); each such
+failure is `InstructionError::ModifiedProgramId`, not a System Program custom error. On
+success only the owner changes.
 
 **Normative table. System Program custom-error domain.**
 
@@ -121,7 +129,7 @@ signer, derivation, funding, and assignment checks remain.
 |---:|---|---|
 | `0` | `AccountAlreadyInUse` | a create destination is already allocated or otherwise in use |
 | `1` | `ResultWithNegativeLamports` | a checked debit would make the source balance negative |
-| `2` | `InvalidProgramId` | assignment/debit ownership or derived owner is not permitted |
+| `2` | `InvalidProgramId` | debit ownership or derived owner is not permitted |
 | `3` | `InvalidAccountDataLength` | allocation length or existing data length violates the selected instruction |
 | `4` | `MaxSeedLengthExceeded` | a seed exceeds 32 bytes |
 | `5` | `AddressWithSeedMismatch` | `SHA256(base \|\| seed \|\| owner)` differs from the addressed account |
