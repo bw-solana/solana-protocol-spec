@@ -588,10 +588,12 @@ deterministically.
 ### 12.8.5 ELF loading and verification
 
 V0–V2 use the lenient parser and relocation path; V3 uses the strict parser. Common
-acceptance requires a 64-bit little-endian ELF for machine `EM_BPF`, an entry aligned to
-an eight-byte instruction, text length divisible by eight, a supported `e_flags`
-version, a resolvable entrypoint, no conflicting function hashes, and bytecode accepted
-by the requisite verifier.
+acceptance requires a 64-bit little-endian System V ELF, an entry aligned to an
+eight-byte instruction, text length divisible by eight, a supported `e_flags` version, a
+resolvable entrypoint, no conflicting function hashes, and bytecode accepted by the
+requisite verifier. The V0–V2 lenient parser additionally requires `e_machine` `EM_BPF`
+(247) or `EM_SBPF` (263) and `e_type` `ET_DYN`; the V3 strict parser requires
+`e_machine` `EM_BPF` (247).
 
 The V3 strict image has this program-header contract:
 
@@ -601,6 +603,7 @@ The V3 strict image has this program-header contract:
 |---|---|
 | ELF class / data / OS ABI | ELF64 / little-endian / System V (`0`) |
 | ELF and header versions | current (`1`) |
+| machine | `EM_BPF` (247) |
 | program-header offset | immediately after the ELF64 file header |
 | program-header count | `e_phnum >= 1` and `e_phoff + 56*e_phnum <= file length`; if entry 0 has `p_flags == PF_R`, then `e_phnum >= 2`, entry 0 is the read-only header, and entry 1 is the bytecode header; otherwise entry 0 is the bytecode header; remaining entries up to `e_phnum` are not validated and not mapped |
 | read-only header | `PT_LOAD`, flags `PF_R`, virtual and physical address `0` |
