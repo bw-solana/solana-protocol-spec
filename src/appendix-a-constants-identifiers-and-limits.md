@@ -55,6 +55,7 @@ informative active liveness profile; they are not block-validity limits.
 | compute budget | default small/ordinary top-level request | `3,000` / `200,000` CU | 7.6 |
 | compute budget | transaction compute-unit limit | `1,400,000` CU | 7.6 |
 | compute budget | heap range and granularity | `32,768..=262,144`, multiple of `1,024` bytes | 7.6, 12.8.4 |
+| fees | signature fee rate | `5,000` lamports per signature | 7.6 |
 | account loading | loaded account data per transaction | `67,108,864` bytes | 7.6–7.7 |
 | account loading | ordinary account overhead / ALT descriptor | `64` / `8,248` bytes | 7.7.1 |
 | PoH / block | hashes per tick / bank tick-height interval / serialized tick Entries | absent / `64` / `1` | 8.4 |
