@@ -195,8 +195,9 @@ in order.
 
 ## 7.4 Version-0 address-table resolution
 
-An address-lookup-table account has length `56 + 32*N`, where `0 <= N <= 256`. Address
-`i` is the 32 raw bytes at `[56+32*i, 88+32*i)`. Its first 56 bytes are:
+An address-lookup-table account has length `56 + 32*N`, where `0 <= N <= 256` for every
+table reachable through program execution. Address `i` is the 32 raw bytes at
+`[56+32*i, 88+32*i)`. Its first 56 bytes are:
 
 **Normative table.**
 
@@ -212,10 +213,13 @@ An address-lookup-table account has length `56 + 32*N`, where `0 <= N <= 256`. A
 | through byte 56 | reserved | canonically zero-filled; for option `0`, bytes `[24,56)` are reserved |
 
 The bytes after the conditional metadata decoder through offset 56 are not addresses. A
-nonmultiple-of-32 address region, more than 256 protocol-state addresses, or an unknown
-state/option discriminant makes the table invalid. Canonical program writes zero the
-padding and reserved region; resolution does not interpret those bytes as fields or
-addresses.
+nonmultiple-of-32 address region or an unknown state/option discriminant makes the table
+invalid. The bound `N <= 256` is an invariant maintained by the Address Lookup Table
+program (Section 13.3.7: Create allocates 56 bytes; Extend rejects a total above 256).
+Address loading does not check it: an initialized table with `N > 256` deserializes, and
+indices `0..=255` resolve normally. Such a table is unreachable through program
+execution. Canonical program writes zero the padding and reserved region; resolution does
+not interpret those bytes as fields or addresses.
 
 [SOL-TXN-0010] Each version-0 lookup entry **MUST** contain at least one writable or
 readonly table index.
