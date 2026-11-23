@@ -541,9 +541,14 @@ layout from Section 6.4, for a total of 132 bytes.
 
 [SOL-WIR-0021] A repair response **MUST** end in the outstanding request's nonce and
 match its request: WindowIndex requires the exact slot and index; HighestWindowIndex
-requires the exact slot and an index not below the request; Orphan permits at most 11
+requires the exact slot and either an index not below the request or a data shred whose
+flags include LAST_IN_SLOT (`0xc0`, Chapter 9), at any index; Orphan permits at most 11
 responses with shred slot not above the request; AncestorHashes permits at most 30
 pairs. Every returned shred **MUST** pass Chapter 9 before use.
+
+A HighestWindowIndex responder that holds the slot's metadata returns the shred at index
+`received - 1` when that index is not below the request or equals the slot's recorded
+last index; the second case produces the LAST_IN_SLOT response below the request.
 
 ## 6.8 Turbine carriage
 
