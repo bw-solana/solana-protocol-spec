@@ -754,7 +754,7 @@ size.
 | `sol_memmove_` | `434371f8` | destination, source, byte length, ignored×2 | `0`; overlap-safe copy |
 | `sol_memset_` | `3770fb22` | destination, value, byte length, ignored×2 | `0`; writes low byte of value |
 | `sol_memcmp_` | `5fdcde31` | first, second, byte length, result `i32`, ignored | `0`; result is first differing `u8(first)-u8(second)`, or zero |
-| `sol_get_processed_sibling_instruction` | `adb8efc8` | reverse sibling index, header, program-ID output, data output, account-meta output | `1` if found, else `0`; always updates required lengths in header when found, copies program/data/metas only when both supplied capacities suffice |
+| `sol_get_processed_sibling_instruction` | `adb8efc8` | reverse sibling index, header, program-ID output, data output, account-meta output | `1` if found, else `0`; when found, if header `data_len` equals the sibling's instruction-data length and header `accounts_len` equals its account-meta count, writes program ID `[32]`, `data_len` data bytes and `accounts_len` 34-byte metas and leaves the header unchanged; otherwise (either field larger or smaller) writes the exact required lengths into the header and no other output |
 | `sol_get_stack_height` | `85532d94` | ignored×5 | current instruction stack height, top-level `1` |
 | `sol_set_return_data` | `a226d3eb` | bytes, length, ignored×3 | `0`; replaces current return data, maximum 1,024 bytes |
 | `sol_get_return_data` | `5d2245e4` | data output, capacity, producer-key output, ignored×2 | full stored length; if copied length is nonzero writes its prefix and producer `[32]`, otherwise writes neither |
@@ -810,7 +810,7 @@ compact account serializations.
 
 These writes require natural alignment and are all-or-nothing.
 
-Except for the documented sibling-header capacity update and operations whose purpose is
+Except for the documented sibling-header length update and operations whose purpose is
 memory copying, no syscall makes a partial output: it charges at the point specified in
 Section 12.8.8, validates selectors/counts and all input/output mappings, computes into
 temporary host state, then writes the complete result. An invalid
