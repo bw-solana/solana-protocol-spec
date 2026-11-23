@@ -35,9 +35,12 @@ enter the active set with activation slot equal to that boundary bank's slot, an
 on-chain feature account **MUST** be rewritten to tag 1 with that slot before the
 boundary state is frozen.
 
-The pending activation slot for a tag-0 feature observed during epoch `e` is
-`first(e+1)`. A feature whose activation epoch is greater than `E` is not part of this
-specification's protocol rules.
+On a given fork, a tag-0 feature observed in a bank of epoch `e` activates at the slot
+of the first descendant bank whose epoch is greater than `e`. That slot is `first(e+1)`
+only when slot `first(e+1)` is present on the fork. If it is skipped, or the fork passes
+over whole epochs, the activation slot is the slot of the first bank actually produced
+after the boundary (SOL-FTR-0003). A feature whose activation epoch is greater than `E`
+is not part of this specification's protocol rules.
 
 [SOL-FTR-0004] An unrecognized feature address **MUST NOT** change executable behavior
 just because its account is owned by the Feature Gate program.
