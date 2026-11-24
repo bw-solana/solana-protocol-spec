@@ -22,11 +22,6 @@ inflation, and other changing state; `E` is not substituted for those inputs. Ch
 construction applies boundary processing once when its epoch exceeds its parent's;
 restoring an in-epoch trusted state does not repeat that transition.
 
-If Mainnet advances to another epoch without a protocol change, updating the reference
-epoch in the specification header is sufficient. Codec names, requirement identifiers,
-formulas, and immutable activation records do not change just because the reference
-epoch changes. A protocol change requires corresponding revisions to the affected rules.
-
 This specification does not standardize process architecture, stages, channels,
 databases, caches, thread scheduling, host execution strategy, or operator interfaces.
 Chapter 19 documents implementation-specific interoperability profiles for transaction
