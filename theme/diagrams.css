@@ -1,0 +1,11 @@
+/* PlantUML emits embedded SVGs with dark labels and a transparent canvas.
+ * Keep a light canvas in every book theme, including mdBook's zoom overlay.
+ * The attribute selector limits this styling to embedded SVG diagrams. */
+.content img[src^="data:image/svg+xml"],
+.content .checkbox-img:checked ~ .img-wrapper > img[src^="data:image/svg+xml"] {
+    background-color: #fff;
+    color-scheme: light;
+    box-sizing: border-box;
+    border-radius: 4px;
+    padding: 12px;
+}

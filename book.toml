@@ -17,7 +17,7 @@ fail-on-error = true
 git-repository-url = "https://github.com/bw-solana/solana-protocol-spec"
 edit-url-template = "https://github.com/bw-solana/solana-protocol-spec/edit/master/{path}"
 site-url = "/solana-protocol-spec/"
-additional-css = ["theme/wide-tables.css"]
+additional-css = ["theme/wide-tables.css", "theme/diagrams.css"]
 
 [output.html.print]
 enable = true

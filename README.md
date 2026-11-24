@@ -37,6 +37,10 @@ do not need JavaScript or access to an external diagram service. Invalid diagram
 the build. Generated images are cached in `.mdbook-plantuml-cache/`, which is not
 committed.
 
+Embedded diagrams keep a white canvas in every book theme, including the zoomed view,
+so their dark text and arrows remain readable when the page uses a dark theme. This
+styling is shared in `theme/diagrams.css`; individual diagrams need no theme settings.
+
 ## Publication
 
 GitHub Actions checks that the book builds for every pull request targeting `master`.
