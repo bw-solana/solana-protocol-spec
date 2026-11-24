@@ -20,8 +20,15 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v6
 
+      - name: Install diagram renderer
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y plantuml graphviz
+
       - name: Install mdBook
-        run: cargo install mdbook --version 0.5.4 --locked
+        run: |
+          cargo install mdbook --version 0.5.4 --locked
+          cargo install mdbook-plantuml --version 2.0.0 --locked --no-default-features
 
       - name: Build specification
         run: mdbook build

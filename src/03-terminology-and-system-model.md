@@ -36,7 +36,6 @@ transition, freezes commitments, and exposes the resulting bank state to consens
 
 ```plantuml
 @startuml
-left to right direction
 rectangle Packets as P
 rectangle "Authenticated messages\nand shreds" as A
 rectangle Reconstruction as R

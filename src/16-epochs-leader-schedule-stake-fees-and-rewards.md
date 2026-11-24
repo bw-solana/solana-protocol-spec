@@ -490,23 +490,18 @@ so skipped slots do not skip rewards.
 
 ```plantuml
 @startuml
-left to right direction
-rectangle "Inactive before\nepoch boundary" as A
-rectangle "Boundary bank\nat height H" as BOUNDARY
-rectangle "Calculate R and P;\ncredit vote commission" as C
-rectangle "Create B partitions;\nset active to true" as D
-rectangle "Height H + 1;\napply partition 0" as E
-rectangle "Height H + 1 + k;\napply partition k" as F
-diamond "Partition B - 1\napplied?" as G
-rectangle "Set active to false" as DONE
-A --> BOUNDARY
-BOUNDARY --> C
-C --> D
-D --> E
-E --> F
-F --> G
-G --> F : no
-G --> DONE : yes
+start
+:Inactive before epoch boundary;
+:Boundary bank at height H;
+:Calculate rewards;\ncredit vote commission;
+:Create B partitions;\nset active to true;
+:k = 0;
+repeat
+    :Height H + 1 + k;\napply partition k;
+    :k = k + 1;
+repeat while (k < B?) is (yes) not (no)
+:Set active to false;
+stop
 @enduml
 ```
 

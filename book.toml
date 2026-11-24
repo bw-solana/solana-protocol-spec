@@ -8,6 +8,11 @@ src = "src"
 build-dir = "book"
 create-missing = false
 
+[preprocessor.plantuml]
+plantuml-cmd = "plantuml"
+use-data-uris = true
+fail-on-error = true
+
 [output.html]
 git-repository-url = "https://github.com/bw-solana/solana-protocol-spec"
 edit-url-template = "https://github.com/bw-solana/solana-protocol-spec/edit/master/{path}"
