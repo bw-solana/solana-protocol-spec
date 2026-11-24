@@ -282,11 +282,29 @@ Vote-instruction discriminant is invalid instruction data.
 | `11` | AuthorizeCheckedWithSeed | authority-kind, `derived_owner[32], seed:string`; new authority is an instruction account signer |
 | `14` | TowerSync | compact tower shown below |
 | `15` | TowerSyncSwitch | compact tower, then `switch_proof_hash[32]` |
+| `17` | UpdateCommissionCollector | `commission_kind:u32`; `0` inflation rewards, `1` block revenue |
 | `18` | UpdateCommissionBps | `commission_bps:u16, commission_kind:u32`; kind `0` is inflation rewards, and other kinds are unavailable in epoch `E` |
 
 Authority-kind is `LE(0,4)` for a voter, `LE(1,4)` for a withdrawer, or
 `LE(2,4) || bls_key[48] || proof_of_possession[96]` for a BLS voter. A seed string uses
 `length:u64 || UTF-8 bytes` and is at most 32 bytes.
+
+UpdateCommissionCollector's conventional accounts are 0 vote `W`, 1 new collector `W`,
+and 2 authorized withdrawer `S`. As for Vote dispatch generally, first borrow account 0
+and check Vote ownership (`InvalidAccountOwner`), then collect instruction signers and
+decode the instruction. Require at least three accounts, load the cached Rent, load
+the initialized vote state, and require its authorized withdrawer in the instruction's
+signer set (`MissingRequiredSignature` otherwise). The signer may occur at another
+instruction-account position; the program does not separately require index 2 to hold
+that key. If the collector key equals the vote account
+key, use that key without borrowing or validating a separate collector. Otherwise,
+check the collector in this order: System owner (`InvalidAccountOwner`), rent-exempt
+balance for its data length (`InsufficientFunds`), effective writability
+(`InvalidArgument`). Set the selected V4 collector field and serialize the vote state.
+An unknown commission-kind tag is `InvalidInstructionData` during decoding, after the
+common owner check but before account-count and vote-state checks. The native Vote
+dispatch charge in Section 12.8.8 applies on both
+success and failure; ordinary instruction failures have Chapter 7 disposition `P2`.
 
 **Normative table.**
 
@@ -510,16 +528,23 @@ program's own instruction accounts exclude the loader-owner account.
 The deprecated and current BPF loaders may execute already-deployed program accounts
 using ABI v0 and v1 respectively, but direct management instructions return
 `UnsupportedProgramId` after the fixed loader charge in Section 12.8.8. The Upgradeable
-Loader alone accepts the management state machine in Section 13.3.2. CPI directly to any
-loader, and CPI to an Upgradeable-Loader Upgrade, SetAuthority, SetAuthorityChecked, or
-Close instruction, returns `UnsupportedProgramId` before the nested invocation begins.
+Loader alone accepts the management state machine in Section 13.3.2. CPI to the Native
+Loader, deprecated/current BPF loaders, or a precompile is forbidden. CPI to the
+Upgradeable Loader is permitted **only** for Upgrade, SetAuthority,
+SetAuthorityChecked, and Close; all other Upgradeable-Loader instructions are
+forbidden. A forbidden CPI raises the syscall error `ProgramNotSupported`, converted
+to `InstructionError::ProgramFailedToComplete` on exit from the invoking SBF program,
+before nested execution. It retains compute already consumed, including CPI entry
+and argument-translation charges, rather than depleting the meter. A permitted CPI
+still undergoes the ordinary account, privilege, instruction, and authority checks.
 
 ### 13.3.9 ZK ElGamal Proof Program
 
 Instruction byte zero is the `u8` discriminant below. For a verify instruction, the
 remaining bytes are either the exact proof-data POD value or exactly four bytes
-`proof_offset:u32`; the latter reads that POD at the offset in readonly account 0. A
-verification with no context needs no more accounts. To store the verified statement,
+`proof_offset:u32`; the latter reads that POD at the offset in account 0 (no writable
+privilege is needed, and supplying it writable is not rejected). A verification with
+no context needs no more accounts. To store the verified statement,
 supply a writable context account followed by the context authority; when proof bytes
 came from account 0 those are accounts 1 and 2.
 
@@ -527,7 +552,7 @@ came from account 0 those are accounts 1 and 2.
 
 | Disc. | Instruction | Context POD, in byte order | Context bytes | Proof bytes | Inline proof-data bytes | Stored context-state bytes | CU |
 |---:|---|---|---:|---:|---:|---:|---:|
-| 0 | CloseContextState | not applicable | — | — | exactly 1 | existing account length | 3,300 |
+| 0 | CloseContextState | not applicable | — | — | at least 1; suffix ignored | existing account length | 3,300 |
 | 1 | VerifyZeroCiphertext | `pubkey[32], ciphertext[64]` | 96 | 96 | 193 | 129 | 6,000 |
 | 2 | VerifyCiphertextCiphertextEquality | `first_pubkey[32], second_pubkey[32], first_ciphertext[64], second_ciphertext[64]` | 192 | 224 | 417 | 225 | 8,000 |
 | 3 | VerifyCiphertextCommitmentEquality | `pubkey[32], ciphertext[64], commitment[32]` | 128 | 192 | 321 | 161 | 6,400 |
@@ -549,8 +574,8 @@ with no padding or trailing bytes. The five-byte account form is exactly
 exactly `authority[32] || proof_type:u8 || context_POD`, which yields the lengths in the
 table.
 
-All keys, ciphertext components, commitments, and proof points are canonical compressed
-Ristretto encodings; each proof scalar is canonical modulo the Ristretto scalar order.
+All keys, ciphertext components, commitments, and proof points use Section 5.8's
+canonical Ristretto encodings; each proof scalar is canonical modulo its scalar order.
 An ElGamal ciphertext is `commitment[32] || decryption_handle[32]`; a two- or
 three-handle grouped ciphertext is one commitment followed by two or three 32-byte
 handles. The proof relations are, respectively: encryption of zero; equality of the two
@@ -558,28 +583,184 @@ ciphertext plaintexts; equality of a ciphertext plaintext and a Pedersen commitm
 opening; knowledge of the secret key corresponding to the supplied public key; either
 `percentage == max_value` or `delta == claimed`; membership of every committed value in
 its declared unsigned bit range; and validity of every grouped decryption handle for one
-shared commitment. Batched grouped proofs check both the low and high grouped ciphertext
-under the same supplied keys.
+shared commitment. Batched grouped proofs combine the low and high statements using
+the transcript-derived scalar specified below.
 
 For a batched range context, selected commitments are the prefix before the first
 all-zero 32-byte commitment, so there are at most eight. The equally long prefix of
-`bit_lengths` supplies the selected unsigned `u8` widths; its sum must be exactly `64`,
-`128`, or `256` for discriminants 6, 7, or 8. The remaining commitment and length slots
-are not selected, but their raw bytes remain bound into the transcript and are not
-required to be zero. Verification uses the named proof's fixed Fiat–Shamir transcript
-and rejects a noncanonical scalar, invalid compressed point, identity commitment where
-prohibited, malformed range vector, or false relation. Any POD decode or verification
-failure is `InvalidInstructionData` after the row's full CU is charged.
+`bit_lengths` supplies the selected unsigned `u8` widths, each in `1..=64`; its sum
+must be exactly `64`, `128`, or `256` for discriminants 6, 7, or 8. At least one
+commitment must be selected. Every remaining commitment byte and length slot **must
+be zero**. All 264 context bytes are bound into the transcript, including that tail.
+The following subsections define the proof algorithms. Any POD decode or verification
+failure is `InvalidInstructionData` after the row's full CU is charged. An account-form
+proof range outside account data is
+instead `InvalidAccountData` before verification.
 
 A context account is Proof-Program-owned and exactly
-`authority[32] || proof_type:u8 || context_POD`. It must contain proof type 0
-Uninitialized and have exactly the resulting length; otherwise return
-`AccountAlreadyInitialized` or `InvalidAccountData`. Success replaces the entire bytes.
-Close takes context `W`, distinct destination `W`, authority `S`; it validates owner,
-initialized type, and exact authority in that order, transfers all lamports, truncates
-data, and assigns System ownership. Failures are respectively
-`MissingRequiredSignature`, `InvalidInstructionData`, `InvalidAccountOwner`,
-`UninitializedAccount`, or `InvalidAccountOwner` for an authority mismatch.
+`authority[32] || proof_type:u8 || context_POD`. After successful verification, storage
+is attempted only if at least two accounts remain after the optional proof account.
+Read the supplied authority key (no signature required), then check context owner
+(`InvalidAccountOwner`), decode its 33-byte metadata (`InvalidAccountData` if too
+short), require proof type 0 (`AccountAlreadyInitialized` otherwise), and require
+exact destination length (`InvalidAccountData`). Success replaces all bytes, setting
+the proof type to the instruction discriminant. A lone additional account is ignored.
+
+Close takes context `W`, destination `W`, authority `S`. In order: require account 2's
+signature (`MissingRequiredSignature`); require distinct context/destination keys
+(`InvalidInstructionData`); check context owner (`InvalidAccountOwner`); decode its
+metadata (`InvalidAccountData`); require a nonzero proof type (`UninitializedAccount`);
+and compare authority (`InvalidAccountOwner` on mismatch). Checked-add all lamports
+to the destination, zero the source balance, truncate its data, and assign System
+ownership. Missing indices and account mutation checks retain Chapter 12 errors.
+Every failure is an instruction failure with Chapter 7 disposition `P2`; no proof
+failure is block-fatal by itself and none returns a custom program error.
+
+#### 13.3.9.1 Proof POD fields and transcript inputs
+
+In the following table every `Y`, `L`, or `R` field is a 32-byte compressed point and
+every other proof field is a canonical 32-byte scalar. Offsets are consecutive multiples
+of 32, starting at zero in the **proof**, after the context. There is no padding,
+field tag, or array count.
+
+**Normative table. Complete proof POD field order.**
+
+| Discriminant | Consecutive 32-byte fields | Total bytes |
+|---|---|---:|
+| 1 | `Y_P, Y_D, z` | 96 |
+| 2 | `Y_0, Y_1, Y_2, Y_3, z_s, z_x, z_r` | 224 |
+| 3 | `Y_0, Y_1, Y_2, z_s, z_x, z_r` | 192 |
+| 4 | `Y, z` | 64 |
+| 5 | `Y_max, z_max, c_max, Y_delta, Y_claimed, z_x, z_delta, z_claimed` | 256 |
+| 6, 7, 8 | `A, S, T_1, T_2, t_x, t_x_blinding, e_blinding`, then interleaved `(L_j,R_j)` for `k=6,7,8` rounds respectively, then `a,b` | `288+64*k` |
+| 9, 10 | `Y_0, Y_1, Y_2, z_r, z_x` | 160 |
+| 11, 12 | `Y_0, Y_1, Y_2, Y_3, z_r, z_x` | 192 |
+
+For each proof, initialize `new_proof(instruction_label)` under Section 5.8, then
+append the context fields in the listed order using the exact labels below. A field
+after `:` names its context bytes; scalar-looking context values here are not proof
+responses. The max value uses its eight little-endian bytes. All other context fields
+use their raw fixed-width POD bytes.
+
+**Normative table. Instruction labels and context transcript appends.**
+
+| Disc. | Instruction label | Ordered `label:field` appends |
+|---:|---|---|
+| 1 | `zero-ciphertext-instruction` | `pubkey:P`, `ciphertext:(C,D)` |
+| 2 | `ciphertext-ciphertext-equality-instruction` | `first-pubkey:P1`, `second-pubkey:P2`, `first-ciphertext:(C1,D1)`, `second-ciphertext:(C2,D2)` |
+| 3 | `ciphertext-commitment-equality-instruction` | `pubkey:P`, `ciphertext:(C,D)`, `commitment:C2` |
+| 4 | `pubkey-validity-instruction` | `pubkey:P` |
+| 5 | `percentage-with-cap-instruction` | `percentage-commitment:Cp`, `delta-commitment:Cd`, `claimed-commitment:Cc`, `max-value:m` |
+| 6–8 | `batched-range-proof-instruction` | `commitments:` all 256 commitment bytes, `bit-lengths:` all eight width bytes |
+| 9 | `grouped-ciphertext-validity-2-handles-instruction` | `first-pubkey:P1`, `second-pubkey:P2`, `grouped-ciphertext:(C,D1,D2)` |
+| 10 | `batched-grouped-ciphertext-validity-2-handles-instruction` | `first-pubkey:P1`, `second-pubkey:P2`, `grouped-ciphertext-lo:lo`, `grouped-ciphertext-hi:hi` |
+| 11 | `grouped-ciphertext-validity-3-handles-instruction` | `first-pubkey:P1`, `second-pubkey:P2`, `third-pubkey:P3`, `grouped-ciphertext:(C,D1,D2,D3)` |
+| 12 | `batched-grouped-ciphertext-validity-3-handles-instruction` | `first-pubkey:P1`, `second-pubkey:P2`, `third-pubkey:P3`, `grouped-ciphertext-lo:lo`, `grouped-ciphertext-hi:hi` |
+
+#### 13.3.9.2 Sigma-proof verification
+
+After the context appends, append `("dom-sep", domain)` from the next table. For
+grouped proofs also append `("handles", LE(h,8))`, with `h=2` or `3`. Append proof
+points in the stated order, challenge `c`, append the response scalars in the stated
+order, then challenge `w` except for proof 4. A point/scalar append uses its field
+name as its label, with the percentage-proof label exceptions shown below.
+
+**Normative table. Sigma transcript order and identity exclusions.**
+
+| Disc. | Domain | Point appends | Response appends before `w` | Points that must be nonidentity |
+|---:|---|---|---|---|
+| 1 | `zero-ciphertext-proof` | `Y_P, Y_D` | `z` | context `P,C,D`; proof `Y_P` (not necessarily `Y_D`) |
+| 2 | `ciphertext-ciphertext-equality-proof` | `Y_0,Y_1,Y_2,Y_3` | `z_s,z_x,z_r` | context `P1,P2,C1,D1`; all proof `Y` points; `C2,D2` may be identity |
+| 3 | `ciphertext-commitment-equality-proof` | `Y_0,Y_1,Y_2` | `z_s,z_x,z_r` | context `P,C,D,C2`; all proof `Y` points |
+| 4 | `pubkey-proof` | `Y` | none; proof `z` is not appended | context `P`; proof `Y` |
+| 5 | `percentage-with-cap-proof` | `Y_max` labelled `Y_max_proof`, then `Y_delta,Y_claimed` | `z_max`, `c_max` labelled `c_max_proof`, `z_x`, `z_delta` labelled `z_delta_real`, `z_claimed` | all context commitments and proof `Y` points |
+| 9, 10 | `validity-proof`, `h=2` | `Y_0,Y_1,Y_2` | `z_r,z_x` | context `P1` and original commitment(s); proof `Y_0,Y_1`; `P2,Y_2` may be identity |
+| 11, 12 | `validity-proof`, `h=3` | `Y_0,Y_1,Y_2,Y_3` | `z_r,z_x` | context `P1,P2` and original commitment(s); proof `Y_0,Y_1,Y_2`; `P3,Y_3` may be identity |
+
+Every point, including one permitted to be identity, must still decode canonically.
+For proof 4, accept exactly `z*H - c*P - Y = 0`. For the other rows, construct the
+ordered residuals below and accept **one** equation `sum(w^j * R_j) = 0`, starting
+at `j=0`. Do not replace this with separate equations or a random batching scalar:
+the transcript-derived weighted equation is the actual acceptance predicate.
+
+**Normative table. Ordered sigma residuals.**
+
+| Disc. | `R_0, R_1, ...`, in order |
+|---:|---|
+| 1 | `z*P-c*H-Y_P`; `z*D-c*C-Y_D` |
+| 2 | `z_s*P1-c*H-Y_0`; `z_x*G+z_s*D1-c*C1-Y_1`; `z_x*G+z_r*H-c*C2-Y_2`; `z_r*P2-c*D2-Y_3` |
+| 3 | `z_s*P-c*H-Y_0`; `z_x*G+z_s*D-c*C-Y_1`; `z_x*G+z_r*H-c*C2-Y_2` |
+| 5 | `c_max*(Cp-m*G)-z_max*H+Y_max`; `z_x*G+z_delta*H-(c-c_max)*Cd-Y_delta`; `z_x*G+z_claimed*H-(c-c_max)*Cc-Y_claimed` |
+| 9–12 | `z_r*H+z_x*G-c*C-Y_0`, followed by `z_r*Pi-c*Di-Y_i` for each handle `i=1..h` |
+
+For batched grouped proofs 10 and 12, after the **original** context appends first
+append `("dom-sep", "batched-validity-proof")`, append `("handles", LE(h,8))`, and
+challenge `t`. Replace each commitment/handle by `lo + t*hi` for the grouped residuals.
+Then run the `validity-proof` transcript sequence without appending another context.
+Apply identity exclusions to the original commitments and keys; there is no separate
+nonidentity check on the batched commitment. This batching is over field scalars, not
+the application-level low/high amount radix.
+
+#### 13.3.9.3 Batched range-proof verification
+
+Let selected commitments be `V_j`, widths `n_j`, `m` the selected count, and
+`N=sum(n_j)` equal to 64, 128, or 256. Use the Section 5.8 generators `G_i,H_i` for
+`i=0..N-1`; no per-party restart or index label is added to their SHAKE streams.
+
+**Normative algorithm. Range transcript and inner-product challenges.**
+
+1. After the 264-byte context has been appended as in Section 13.3.9.1, append
+   `("dom-sep","range-proof")` and `("n",LE(N,8))`.
+2. Append nonidentity `A,S` under those labels; challenge `y`, then `z`.
+3. Append nonidentity `T_1,T_2`; challenge `x`. Append scalars `t_x`,
+   `t_x_blinding`, and `e_blinding`. Challenge `w`, then challenge `c` and discard
+   its value. The discarded challenge still changes transcript state.
+4. Append `("dom-sep","inner-product")` and `("n",LE(N,8))`. Require exactly
+   `k=log2(N)` interleaved point pairs. For each pair in wire order, append
+   nonidentity `L_j` labelled `L`, then nonidentity `R_j` labelled `R`, and challenge
+   `u_j` labelled `u`.
+5. Append `a` labelled `ipp_a`, then `b` labelled `ipp_b`, and challenge `d`.
+   Reject any noncanonical scalar or point, or any prohibited identity, before the
+   final group check. All arithmetic below is in the Section 5.8 scalar field.
+
+Compute inverse challenges and `s_i` using the following exact recurrence. `inv(v)` is
+`v^(l-2)` (zero maps to zero). Batch inversion uses the product-inversion/prefix-product
+algorithm: `prefix_j=product(u_0..u_(j-1))`, `v=inv(product(u_j))`; in reverse order set
+`u_inv_j=v*prefix_j`, then `v=v*u_j`. Initially retain
+`allinv=inv(product(u_j))`. This fixes the arithmetic even for a zero challenge.
+
+**Normative algorithm. Range verification coefficients.**
+
+```text
+s_0 = allinv
+for i in 1..N-1:
+    h = floor(log2(i))
+    s_i = s_(i-2^h) * u_(k-1-h)^2
+
+B = concatenate, for j=0..m-1: [z^j * 2^b for b=0..n_j-1]
+delta = (z-z^2)*sum(y^i, i=0..N-1)
+        - sum(z^(j+3)*(2^n_j-1), j=0..m-1)
+g_i = -z - a*s_i
+h_i = z + inv(y)^i * (z^2*B_i - b*s_(N-1-i))
+g = w*(t_x-a*b) + d*(delta-t_x)
+```
+
+`inv(y)^0` is one, including when `y=0`. Accept exactly the following identity in
+Ristretto; all its selected context and proof points must have decoded successfully.
+
+**Normative algorithm. Range-proof final equation.**
+
+```text
+A + x*S + d*x*T_1 + d*x^2*T_2
+  - (e_blinding + d*t_x_blinding)*H + g*G
+  + sum(u_j^2*L_j + u_inv_j^2*R_j, j=0..k-1)
+  + sum(g_i*G_i + h_i*H_i, i=0..N-1)
+  + sum(d*z^(j+2)*V_j, j=0..m-1)
+  = 0
+```
+
+The transcript labels, discarded challenges, and batching scalars above are part of
+the acceptance predicate and cannot be replaced by library-selected defaults.
 
 ### 13.3.10 Core-BPF migration and upgrade side effects
 
@@ -621,7 +802,7 @@ specific protocol exception is specified. Known addresses are:
 
 | Sysvar | Address | Lifetime/update role |
 |---|---|---|
-| Clock | `SysvarC1ock11111111111111111111111111111111` | updated for each child bank before transactions |
+| Clock | `SysvarC1ock11111111111111111111111111111111` | child slot/epoch before transactions; footer time after transactions, Section 13.5 |
 | EpochRewards | `SysvarEpochRewards1111111111111111111111111` | initialized/updated during partitioned rewards |
 | EpochSchedule | `SysvarEpochSchedu1e111111111111111111111111` | genesis-derived schedule |
 | Instructions | `Sysvar1nstructions1111111111111111111111111` | transaction-local synthesized account |
@@ -673,7 +854,8 @@ point.
 
 [SOL-PRG-0017] Before transaction execution, SlotHashes **MUST** incorporate the parent
 slot and parent bank hash according to its bounded history rule, and Clock **MUST**
-identify the child slot and epoch with the stake-weighted timestamp result below.
+identify the child slot and epoch while retaining the parent's footer-derived Unix
+timestamp, as specified below.
 
 [SOL-PRG-0018] StakeHistory **MUST** be updated exactly when the child crosses an epoch
 boundary, and LastRestartSlot **MUST** reflect the greatest qualifying hard-fork or
@@ -687,20 +869,45 @@ distributed amount.
 recent-blockhash queue after terminal hash registration; during freeze, SlotHistory
 **MUST** record the child slot before bank hashing.
 
-The bounded histories, timestamp estimator, reward fields, and deprecated-sysvar
+The bounded histories, footer timestamps, reward fields, and deprecated-sysvar
 availability are selected by the bank feature state and the relevant protocol-program
 transition.
 
-For child slot `s`, retain each vote account's most recent timestamp only when its
-reported slot `r <= s` and `s-r <= 432000`. Advance that timestamp by the PoH duration
-from `r+1` through `s`, group equal advanced estimates, and sum the epoch stake
-delegated to each group with saturating `u128` arithmetic. The estimate is the smallest
-timestamp whose cumulative stake in ascending timestamp order is strictly greater than
-half the total included stake. If no stake is included, retain the parent's timestamp.
-Relative to the epoch-start PoH estimate, clamp an estimate that is too far behind to
-25% behind and one that is too far ahead to 150% ahead; finally, do not permit the child
-Unix timestamp to precede its parent's. On an epoch boundary, the resulting value also
-becomes `epoch_start_timestamp`.
+**Normative algorithm. Alpenglow Clock update order.**
+
+1. Before the child's transactions, set `Clock.slot` to the child slot and derive
+   `epoch` and `leader_schedule_epoch` from EpochSchedule. Retain the parent's
+   `unix_timestamp`. At an epoch boundary set `epoch_start_timestamp` to that inherited
+   timestamp; otherwise retain the parent's `epoch_start_timestamp`. Transactions in
+   this bank observe these values, not the child's later footer timestamp.
+2. Validate the footer and its timestamp bounds under Section 9.6, and finish all
+   outstanding transaction execution. Convert its nonnegative nanosecond timestamp
+   `t`, which must fit `i64`, to seconds by signed integer division `t / 1,000,000,000`
+   truncating toward zero. Set `Clock.unix_timestamp` to those seconds. At an epoch
+   boundary also replace `epoch_start_timestamp` with those seconds. Slot and epoch
+   fields still identify the child.
+3. Replace the nanosecond-clock account defined below, adjusting capitalization for
+   the full difference from its previous balance. Refresh the sysvar cache so subsequent
+   protocol processing sees the new Clock. Apply footer vote rewards and finalization
+   updates only after these clock writes, then freeze and check the footer bank hash.
+
+No stake-weighted timestamp estimator is used in this active transition.
+
+**Normative table. Nanosecond-clock account (`alpenclock`).**
+
+| Property | Exact value |
+|---|---|
+| address | `GaGQ2vyb3xuUwjKiq9tQQWoqhzWYh7LbiLXvqG2sUzzG` |
+| derivation | Section 5.5 PDA with seed `alpenclock`, bump `254`, and program ID `A1pengvuM6JEcyNuTnMqepBKhwHE3N6PmUrdATGawhJS` |
+| data `[0,8)` | footer timestamp as `i64` little-endian nanoseconds; exactly 8 bytes |
+| owner / executable | System Program / false |
+| `rent_epoch` | `0` on each replacement; this metadata is not the bank epoch |
+| replacement balance | exactly `946,560` lamports: `(128 + 8) * 6,960`, using the runtime's fixed default-rent rate, not the bank's Rent sysvar rate |
+
+This is protocol-owned state, not a sysvar or a transaction write. Each accepted footer
+replaces its complete account value; an excess previous balance is removed from
+capitalization. Its stored nanoseconds supply the parent timestamp used by the next
+block's footer-bound check. Trusted-root state must include it.
 
 ## 13.6 Instructions sysvar
 
@@ -774,12 +981,10 @@ always-readonly base entry; no feature adds or removes it in `E`.
 | Native Loader | `NativeLoader1111111111111111111111111111111` | base | always readonly |
 | Sysvar owner | `Sysvar1111111111111111111111111111111111111` | base | always readonly |
 
-[SOL-PRG-0024] Immediately after address resolution, sanitation **MUST** demote every
-row above to readonly. Demotion changes only the effective writable bitmap: the signed
-message bytes and its three header counts remain unchanged. A reserved address requested
-writable still contributes one requested-writable-account cost in Section 10.4.1, but
-it is not included in effective-writable account cost attribution and does not change
-fee calculation.
+[SOL-PRG-0024] Sanitation **MUST** apply the complete Section 7.3 writability algorithm
+to this reserved set, including its precedence over the invoked-program loader
+exception. Section 7.3 is authoritative for the demotion phase, unchanged message
+header, lock privileges, requested/effective cost distinction, and fee behavior.
 
 [SOL-PRG-0025] At freeze, a present incinerator account **MUST** be replaced with the
 default account and its lamports **MUST** be removed from capitalization before the

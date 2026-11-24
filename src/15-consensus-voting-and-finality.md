@@ -3,15 +3,32 @@
 ## 15.1 Consensus algorithm
 
 Mainnet epoch `E` uses Alpenglow. Consensus operates on Section 14.5 block IDs and the
-current epoch's admitted vote-account stake set. It does not use Tower lockouts, switch
+current epoch's consensus rank map below. It does not use Tower lockouts, switch
 proofs, or heaviest-observed-subtree fork choice.
 
 ## 15.2 Consensus wire codec and signer set
 
+**Normative algorithm. Consensus rank construction.**
+
+Construct the consensus rank map from the VAT-admitted epoch vote-account snapshot in
+Section 16.6.1. Select candidates with nonzero stake and a stored BLS key that decodes
+to a valid G1 public key under Section 5.7. Count compressed BLS keys and node identity
+keys across these candidates. Remove **every** candidate whose BLS key or node identity
+occurs more than once; choosing one duplicate arbitrarily is not permitted. Sort the
+survivors by descending stake, breaking ties by ascending lexicographic order of their
+48 compressed BLS-key bytes. Assign consecutive `u16` ranks starting at zero. Each
+rank records vote-account key, node identity, BLS key, and stake.
+
+The consensus denominator `T` is the `u64` saturating sum of surviving stakes and must
+be nonzero. This filtered rank map, not the larger VAT-admitted snapshot, controls
+consensus connection identity, vote/certificate verification, and signer bitmaps.
+Leader scheduling and epoch-reward accounting continue to use their own specified
+epoch stake inputs; duplicate-identity filtering does not silently alter those inputs.
+
 An `ALPENGLOW-WIRE` datagram is Wincode fixed-integer encoding with no alignment
 padding. It begins with outer-version byte `1`, then one kind record, then shred version
 `u16` little-endian. A block target is slot `u64` little-endian followed by its 32-byte
-block ID. Vote signatures are uncompressed BLS12-381 signatures of 192 bytes.
+block ID. Vote signatures use the 192-byte BLS signature envelope in Section 5.7.
 
 **Normative table. Consensus-message kinds.**
 
@@ -28,7 +45,7 @@ block ID. Vote signatures are uncompressed BLS12-381 signatures of 192 bytes.
 | `10` | Notar-fallback certificate | block; certificate signature |
 | `11` | Skip certificate | slot; certificate signature |
 
-A certificate signature is a 192-byte uncompressed aggregate BLS signature, a bitmap
+A certificate signature is a 192-byte aggregate BLS signature (Section 5.7), a bitmap
 byte length as `u64` little-endian, and exactly that many bitmap bytes. Tags 6 and 12 are
 reserved and rejected in the epoch-`E` profile. Every other tag is unknown and rejected.
 
@@ -56,9 +73,9 @@ uses the bitmap ranks to select BLS public keys, and verifies the aggregate sign
 
 [SOL-CON-0001] A receiver **MUST** require the wire shred version to be `50093`, decode
 the datagram exactly, and identify the sender's node identity from its authenticated
-connection. It **MUST** map that identity to one admitted vote account and derive its
-rank, BLS public key, and effective stake from the target slot's epoch stake map; none
-of those values is supplied by the datagram. Signature verification **MUST** reconstruct
+connection. It **MUST** map that identity to one surviving consensus rank and derive its
+vote account, BLS public key, and effective stake from the target slot's epoch rank map;
+none of those values is supplied by the datagram. Signature verification **MUST** reconstruct
 the signed vote payload with the same expected shred version.
 
 [SOL-CON-0002] A vote **MUST** verify against the canonical signed payload under the
@@ -68,7 +85,7 @@ and enough selected effective stake for its kind. A rank contributes at most onc
 
 ## 15.3 Certificates and exact stake thresholds
 
-Let `T` be the sum of effective stake of all admitted epoch vote accounts and `S` the
+Let `T` be the consensus-rank-map denominator in Section 15.2 and `S` the
 sum for the unique ranks selected by a valid certificate. Compare exact integers; do not
 convert them to floating point.
 
@@ -83,7 +100,7 @@ convert them to floating point.
 | Fast-finalize | Notar for the exact block | `5*S >= 4*T` |
 
 Equality passes every threshold. A certificate with zero total stake, a rank beyond the
-admitted map, or a bitmap length inconsistent with that map is invalid.
+consensus rank map, or a bitmap length inconsistent with that map is invalid.
 
 [SOL-CON-0003] A participant **MUST** accumulate votes separately by kind and exact
 target, construct only the certificate combinations in the table, and apply the integer
@@ -126,7 +143,8 @@ the slot, never both. Later fallback votes do not erase that first vote.
 
 For one slot let `N(b)` be stake that sent a Notar vote for exact block `b`, `K` stake
 that sent Skip, `N_all` the sum of Notar stake across all block IDs, and `N_max` the
-largest `N(b)`. Count each admitted vote account once in each applicable set.
+largest `N(b)`. Count only Section 15.2 consensus ranks, once per applicable set, using
+that map's denominator `T`.
 
 **Normative algorithm.**
 

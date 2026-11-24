@@ -35,15 +35,21 @@ Chapters 11 and 14.
 ## 4.2 Ownership and mutation limits
 
 An instruction may change an account only through the privileges and ownership rules
-established by the transaction and invocation context. SBF ABI v1 reserves 10,240 bytes
-after each account's original data for growth during one instruction. Across a
-transaction, the aggregate positive data-length change is at most 20,971,520 bytes,
-while every individual account remains bounded by 10,485,760 bytes.
+established by the transaction and invocation context. The account-size ceiling in
+Section 4.1 applies to native and SBF programs alike. The additional SBF input-buffer
+and CPI reallocation bounds are defined in Sections 12.8.6 and 12.4; they are not a
+universal limit on native instructions. In particular, a System Program allocation
+may allocate an account up to the Section 4.1 ceiling in one instruction.
 
-[SOL-ACC-0003] An instruction **MUST NOT** increase one account's data length by more
-than `10,240` bytes relative to that instruction's entry length, and a transaction
-**MUST NOT** produce aggregate positive account-data growth greater than `20,971,520`
-bytes.
+[SOL-ACC-0003] A transaction **MUST** maintain a signed `i64` resize counter, initially
+zero. Before each account-length change from `old` to `new`, it **MUST** reject
+`new > 10,485,760` as `InvalidRealloc`, then reject
+`counter.saturating_add(new - old) > 20,971,520` as
+`MaxAccountsDataAllocationsExceeded`. An accepted change adds `new - old` to the
+counter with signed saturating arithmetic. Shrinking an account releases resize
+capacity; the counter is not a sum of positive allocations. Ownership and writability
+checks still apply. Program-specific validation and SBF-specific bounds may reject a
+request before it reaches this runtime resize primitive.
 
 [SOL-ACC-0004] Only the account owner **MAY** modify account data or change its
 length, except for an explicit protocol-program transition; only a writable account

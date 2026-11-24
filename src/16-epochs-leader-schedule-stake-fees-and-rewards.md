@@ -178,9 +178,18 @@ Ticket (VAT).
 If more than 2,000 accounts pass the BLS, stake, and balance filters, determine the stake
 of the first truncated entry after descending-stake selection and retain only accounts
 with stake strictly greater than that value. Every account tied across the boundary is
-removed; a public key is not a tie-breaker. The resulting set and rank map govern
-Alpenglow transport, consensus stake, leader scheduling, reward certificates, and epoch
-reward distribution.
+removed; a public key is not a tie-breaker. This produces the VAT-admitted epoch
+vote-account snapshot used by leader scheduling and epoch reward distribution.
+Consensus derives a separate, possibly smaller rank map from this snapshot using
+Section 15.2's invalid-key and duplicate-key/identity filters. Consensus signatures,
+reward-certificate signer ranks, and consensus stake thresholds use that rank map;
+they do not reuse the VAT-admitted set's unfiltered stake total.
+
+At this boundary, store the new consensus/leader snapshot under leader-schedule epoch
+`d+1`, as defined in Section 16.1. The snapshot already stored for epoch `d` remains
+the one used for that epoch's slots. Distribution processing uses the newly filtered
+distribution map under its own reward rules; the future consensus snapshot's map key
+must not shift the rewarded epoch or replace the current epoch's consensus ranks.
 
 For every admitted account, subtract exactly `800,000,000` lamports with checked
 arithmetic, record a VAT-debit reward, and credit the sum to the incinerator. The normal
@@ -364,7 +373,9 @@ signer sets is deduplicated by vote-account address.
 
 Let `R_e` be the Section 16.6.2 budget recorded for the epoch of the crediting block,
 `V_s` one selected validator's effective delegated stake in the snapshot for slot `s`,
-and `T_s` total admitted stake in that snapshot. With `Q = 432,000` slots/epoch:
+and `T_s` total VAT-admitted stake in that snapshot. This reward denominator is not
+Section 15.2's smaller, duplicate-filtered consensus denominator. With
+`Q = 432,000` slots/epoch:
 
 **Normative algorithm.**
 

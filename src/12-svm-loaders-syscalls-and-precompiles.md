@@ -132,11 +132,22 @@ NOT** exceed 64 entries.
 
 [SOL-SVM-0018] CPI **MUST NOT** directly target the Native Loader, a BPF loader, an
 active signature precompile, or an upgradeable-loader management instruction outside the
-active allowlist.
+Section 13.3.8 allowlist. In this rule “a BPF loader” means the deprecated or current
+non-upgradeable loader, not the Upgradeable Loader's four permitted instructions.
 
 [SOL-SVM-0019] Before entering a callee and after returning to its caller, the runtime
 **MUST** synchronize every shared account's lamports, data, owner, and permitted length
 changes without losing aliases or duplicate-account privileges.
+
+For an SBF caller, let `L0` be the account length when that **caller invocation** was
+serialized, and `R` its Section 12.8.6 realloc-reserve length (zero for ABI v0).
+Translating a caller account-info whose data length exceeds `L0+R` returns
+`InvalidRealloc` before callee execution. After a successful callee, synchronization
+back to that caller returns `InvalidRealloc` if the runtime account length exceeds
+`L0+R`. Repeated or nested CPIs do not reset the caller's `L0`. This includes native
+callees: an otherwise valid native allocation can fail when its result cannot fit the
+SBF caller's input account region. The Section 4.2 transaction resize meter and account
+size ceiling apply in addition.
 
 [SOL-SVM-0020] Instruction pop **MUST** fail if an account remains borrowed or if
 aggregate lamports differ from the aggregate on instruction entry, and the resulting
@@ -329,7 +340,7 @@ committed protocol outputs.
 | `ArithmeticOverflow` | transition requires checked arithmetic and it overflows |
 | `UnsupportedSysvar` | requested sysvar is outside the active syscall/cache set |
 | `IllegalOwner` | requested new owner is forbidden |
-| `MaxAccountsDataAllocationsExceeded` | positive transaction account-data growth exceeds `20,971,520` bytes |
+| `MaxAccountsDataAllocationsExceeded` | signed transaction resize counter would exceed the Section 4.2 limit |
 | `MaxAccountsExceeded` | runtime account collection exceeds its protocol bound |
 | `MaxInstructionTraceLengthExceeded` | push would exceed 64 trace entries |
 | `BuiltinProgramsMustConsumeComputeUnits` | a native dispatch returns without its mandatory charge |
@@ -511,7 +522,6 @@ immediate zero divisor, invalid shift/endian immediate, or misaligned V1/V2
 | Limit / rule | Active value |
 |---|---:|
 | instruction size | 8 bytes |
-| maximum text instructions | 65,536 |
 | VM registers | twelve internal `u64` slots; program-visible `r0..r10` |
 | local SBF call depth | 64 |
 | stack frame | 4,096 bytes |
@@ -576,7 +586,7 @@ mapping.
 | bytecode and V0–V2 read-only image | `0x0000000100000000` | executable/read-only |
 | stack | `0x0000000200000000` | read/write within active frames |
 | heap | `0x0000000300000000` | read/write, transaction-selected size |
-| serialized input | `0x0000000400000000` | metadata and readonly account fields read-only; permitted account fields/data writable as described below |
+| serialized input | `0x0000000400000000` | copied input buffer is read/write, including metadata and readonly-account copies; state changes are validated on deserialization |
 
 The default heap is 32,768 bytes. A compute-budget instruction may select a 1,024-byte
 multiple from 32,768 through 262,144 bytes. Stack allocation is `64 * 4096 = 262144`
@@ -621,6 +631,9 @@ registers, forbidden writes to `r10`, invalid immediate shift/endian/divisor val
 malformed `LDDW`, jumps outside text or into an `LDDW` continuation, invalid `CALLX`
 registers, and immediate calls that do not resolve under the selected version.
 
+There is no separate 65,536-instruction text ceiling. Text remains bounded by the ELF
+segment rules, program-account size, valid call/jump encodings, and execution meter.
+
 [SOL-SVM-0036] Deployment and loading **MUST** reject an ELF that violates its version's
 header, relocation, symbol, text, entrypoint, syscall-resolution, or
 bytecode-verification rule before it can execute.
@@ -636,7 +649,7 @@ ABI v1 nonduplicate account record:
 
 **Normative table.**
 
-| Order | Field | Encoding / length | Writable by program |
+| Order | Field | Encoding / length | Eligible for account-state writeback |
 |---:|---|---|---|
 | 1 | duplicate marker | byte `0xff` | no |
 | 2 | signer flag | `u8`, `0` or `1` | no |
@@ -651,6 +664,15 @@ ABI v1 nonduplicate account record:
 | 11 | realloc reserve | 10,240 zero bytes | used only for permitted growth |
 | 12 | alignment padding | zero bytes through the next 8-byte boundary | no |
 | 13 | rent epoch | `u64::MAX` LE | no |
+
+The final column describes state writeback, not guest-memory protection. Both ABIs
+use a writable copied input buffer in the active environment. A guest store to a
+readonly account's copied data is therefore not itself a VM access fault. At successful
+exit, the runtime validates the resulting account fields before committing them;
+restoring the original bytes before exit leaves no account change to reject. Changes
+to copied keys, flags, duplicate markers, padding, rent epoch, instruction data, and
+program ID are not deserialized into account state or privileges. They cannot change
+the trusted account metadata retained by the runtime.
 
 An ABI v1 duplicate record has this layout:
 
@@ -790,8 +812,14 @@ every input wholly in readable guest memory. Typed `u64`, `i32`, descriptor, poi
 scalar, CPI, and sysvar pointers have their natural alignment; byte and public-key
 buffers have alignment one. With the active parameter-address restriction, fixed/generic
 sysvar destinations may not begin in the serialized-input region. With the active
-output-overlap rule, cryptographic, PDA, hash, and return-data output intervals must not
-overlap an input interval to the same call. CPI additionally pins every supplied key,
+output-overlap rule, multiple mutable output regions translated together must not
+overlap one another. This is not a general input/output nonoverlap rule: SHA-256 and
+Keccak read and hash all selected slices before writing the digest, so their output
+may overlap readable input bytes. `try_find_program_address` requires its address and
+bump outputs to be disjoint; `memcpy` has its own source/destination nonoverlap rule,
+while `memmove` permits overlap. Each syscall's translation and write order controls
+other aliases; an implementation **MUST NOT** invent a blanket input/output rejection.
+CPI additionally pins every supplied key,
 owner, lamport, and data pointer to that account's ABI address and requires its mutable
 data-length word to be outside serialized account memory.
 
@@ -959,8 +987,9 @@ following instruction charge before proof verification or context closure:
 | VerifyGroupedCiphertext3HandlesValidity | `8,100` CU |
 | VerifyBatchedGroupedCiphertext3HandlesValidity | `16,400` CU |
 
-Poseidon cost for `n` inputs is `61*n^2 + 542`. MSM cost for positive length `n` is
-`base + (n-1)*increment`. BLS pairing costs `25,445 + 13,023*max(n-1,0)`. BN254 pairing,
+Poseidon cost for `n` inputs is `61*n^2 + 542`. Curve25519 MSM cost for length `n` in
+`0..=512` is `base + max(n-1,0)*increment`; even an empty MSM pays the base. BLS pairing
+costs `25,445 + 13,023*max(n-1,0)`. BN254 pairing,
 where `n=floor(input_length/192)`, costs
 `36,364 + 12,121*max(n-1,0) + 85 + input_length + 32`; a malformed nonmultiple length
 is still charged by that formula before returning failure. Each generic hash syscall
@@ -994,7 +1023,7 @@ The byte-dependent and invocation charges are:
 | CPI fixed entry | `946` CU, before argument translation and callee execution |
 
 For one CPI with `m` account metas, `i` account-info records, instruction-data length
-`D`, and unique callee account-data lengths `A_j`, argument translation adds:
+`D`, and unique instruction-account data lengths `A_j`, argument translation adds:
 
 **Normative algorithm.**
 
@@ -1007,7 +1036,9 @@ floor(D / 250)
 
 The 80-byte account-info term is the active accounting size, independent of whether the
 guest used the C or Rust descriptor. Duplicate instruction accounts do not repeat the
-`A_j` term. Callee instructions, heap provisioning, syscalls, and nested CPI continue to
+`A_j` term. For an executable account `A_j` is the runtime account's data length; for
+another account it is the translated caller account-info data length. Callee
+instructions, heap provisioning, syscalls, and nested CPI continue to
 draw from the same meter. All divisions in this subsection are unsigned integer floor;
 all sums and products saturate unless a named operation requires checked failure.
 
@@ -1015,11 +1046,35 @@ all sums and products saturate unless a named operation requires checked failure
 
 | Syscall family | Charge ordering |
 |---|---|
-| panic, logging, PDA, secp recovery, memory, return-data, sibling/stack, fixed/generic sysvar, epoch stake, and CPI | consume the listed base or length charge before translating the first guest pointer; later validation failure retains it |
-| generic SHA-256/Keccak-256 | reject a count above 20,000 without charge; otherwise consume 85, validate the output and descriptor array, then consume each slice's charge immediately before hashing that slice |
-| Curve25519/BLS group operations | reject an unsupported selector without charge; for a supported selector consume the complete operation/count charge before translating points, scalars, or output |
+| panic; ordinary string, integer, key and compute-unit logging; secp recovery; memory; set-return-data; sibling/stack; fixed/generic sysvar; epoch stake | consume the listed charge before translating the first guest pointer; later validation failure retains it. Set-return-data also charges before rejecting length above 1,024. A sibling not found returns without translating outputs. |
+| `sol_log_data` | consume 100; translate the slice-descriptor array; consume `100*n`; consume the saturating sum of the descriptor lengths; translate each slice in order; emit the log only after all translations succeed |
+| create program address | consume 1,500; translate/validate seeds and program ID; derive the address; on success translate and write the output |
+| try-find program address | consume 1,500; translate/validate seeds and program ID; try bump 255. After each failed bump consume another 1,500 before the next attempt, including after failed bump 1. Translate the two disjoint outputs only on success. |
+| get-return-data | consume 100; determine `L = min(requested_length, stored_length)`; if `L=0` return stored length without mapping either output. Otherwise consume `floor((L+32)/250)`, then map both disjoint outputs and copy. |
+| CPI | consume 946, then perform the staged translation/charging algorithm below; do not precharge its total byte formula |
+| generic SHA-256/Keccak-256 | reject a count above 20,000 without charge; otherwise consume 85, validate the output and descriptor array, then for each slice translate its input, consume `max(10,floor(L/2))`, and hash it. Write the digest only after every slice succeeds. |
+| Curve25519/BLS group operations | reject an unsupported selector without charge; Curve25519 MSM rejects `n>512` before selector dispatch or charging. For a supported operation consume its complete operation/count charge before translating points, scalars, or output. |
 | BN254 group operation or compression | reject an unsupported/inactive selector without charge; otherwise compute and consume the full selected charge before pointer and curve-input validation |
 | Poseidon | reject an invalid parameter ID, endian ID, count above 12, or cost overflow without charge; otherwise consume `61*n^2+542` before pointer, field, and output validation |
+
+**Normative algorithm. CPI byte-charge order.**
+
+1. After the 946-CU entry charge, translate the instruction structure, program ID,
+   account-meta array, and instruction-data bytes. Check instruction size limits, then
+   consume `floor(D/250) + floor(34*m/250)`. Validate meta Boolean fields and, for the
+   C ABI, translate each meta's public-key pointer.
+2. Translate signer seeds and derive signer addresses. Apply Section 13.3.8's program
+   allowlist, then prepare the nested instruction and check its account privileges.
+3. Apply the account-info address restriction, translate that array, and check its
+   count. Only then consume `floor(80*i/250)` and translate account-info key pointers.
+4. Visit callee instruction accounts in order, skipping duplicate transaction indices.
+   For an executable account consume `floor(A_j/250)` directly. For another account,
+   find its caller account-info, validate/translate its pinned fields and data pointers,
+   then consume `floor(A_j/250)`. Missing accounts and pointer failures stop this walk;
+   later accounts are neither translated nor charged.
+5. Synchronize caller account changes into the runtime, execute the callee, and on
+   success synchronize its results back. These steps do not add another byte-copy
+   charge; callee instructions and syscalls consume their own charges.
 
 No validation failure refunds compute already consumed. A syscall that returns an
 ordinary nonzero status instead of raising an instruction error consumes the same charge
@@ -1033,9 +1088,10 @@ transaction compute meter, and the remaining units at every protocol-visible bou
 
 ### 12.8.9 Completion, deserialization, and failure
 
-On an ordinary VM exception other than a syscall-originated instruction error, the
+On an ordinary VM exception other than a syscall-originated error, the
 active `deplete_cu_meter_on_vm_failure` rule consumes all remaining transaction compute.
-A syscall-originated instruction error retains the compute already charged by that path.
+A syscall-originated error retains the compute already charged by that path, including
+one converted to `ProgramFailedToComplete` because it is not an `InstructionError`.
 Successful VM exit is not instruction success until parameter deserialization,
 account-change validation, lamport balance, borrow checks, and invocation-pop checks all
 succeed.

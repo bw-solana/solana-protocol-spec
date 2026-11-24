@@ -185,9 +185,15 @@ lookup.
 detected by this same scan; the implementation **MUST NOT** report the duplicate before
 an excessive resolved lock count.
 
-[SOL-TXN-0009] The runtime **MUST** apply the reserved-key set in Section 13.7 when
-deriving writability, and a reserved key **MUST NOT** remain writable when the
-transaction reaches account locking or execution.
+[SOL-TXN-0009] After resolving the complete key list, the runtime **MUST** demote every
+Section 13.7 reserved key to readonly. It **MUST** also demote each key used as a
+top-level instruction's program ID, unless the Upgradeable BPF Loader address is
+present anywhere in the complete key list. Loader presence does not exempt reserved
+keys. These demotions **MUST** precede account locking and execution and **MUST NOT**
+change the signed message header or its requested-writable classification. Effective
+writability governs write locks, execution/CPI privileges, the Instructions sysvar,
+and writable-account cost attribution; requested writability still determines the
+write-lock cost in Section 10.4.1. Demotion does not change the transaction fee.
 
 The transaction signature vector is not part of `K`. The first
 `required_signature_count` static keys identify the signature-verification public keys
@@ -257,8 +263,11 @@ For an uninitialized state, the remaining account-data bytes are zero padding. G
 bank's latest registered blockhash `H`, its next durable nonce is
 `SHA256("DURABLE_NONCE" || H)`, where the domain is the 13 ASCII bytes. Instruction zero
 marks a durable transaction only when its program ID is the System program, its data
-begins `04 00 00 00`, and its first account index selects the nonce account; bytes after
-that four-byte discriminant do not affect marker recognition.
+begins `04 00 00 00`, and its first account index selects a **static, effectively
+writable** account (`index < |S|` after Section 7.3 demotion). Bytes after that
+four-byte discriminant do not affect marker recognition. A loaded ALT address or a
+readonly account is not a nonce marker. If ordinary blockhash admission has failed,
+a missing or invalid marker yields `BlockhashNotFound` before any fee is charged.
 
 [SOL-TXN-0013] For signature index `i`, the runtime **MUST** verify the 64-byte Ed25519
 signature against the exact serialized message bytes using static key `S[i]`, and any
@@ -359,7 +368,7 @@ age and validity checks.
 
 [SOL-TXN-0023] The charged transaction fee **MUST** be the saturating sum of the
 signature fee and prioritization fee; its collection and later distribution **MUST**
-follow Chapters 11 and 15.
+follow Chapters 11 and 16.
 
 ## 7.7 Fee payer and account loading
 
@@ -367,9 +376,26 @@ follow Chapters 11 and 15.
 writable and signed, and **MUST** hold either a system account or an initialized system
 nonce account.
 
-[SOL-TXN-0025] Fee validation **MUST** reject a payer that cannot pay the full fee while
-retaining the rent-exempt reserve required by its post-fee account state, and it
-**MUST** reject a post-fee rent-paying state reached from a rent-exempt pre-fee state.
+[SOL-TXN-0025] Fee validation **MUST** apply the following ordered checks to a local
+copy of the fee payer, before creating committed fee/nonce rollback state.
+
+**Normative algorithm. Fee-payer validation and error precedence.**
+
+1. An absent or zero-lamport payer returns `AccountNotFound`.
+2. Require System ownership and either zero data bytes or an exactly 80-byte decoded
+   Initialized nonce state; otherwise return `InvalidAccountForFee`.
+3. Let reserve be zero for the empty System account, or `Rent.minimum_balance(80)`
+   for a nonce account. Check `pre.checked_sub(reserve).checked_sub(fee)`; failure
+   returns `InsufficientFundsForFee`. This reserve check precedes the rent-state check.
+4. Subtract the fee from the local copy. Under the active relaxed rent rule, every
+   nonzero pre-balance is classified RentExempt for this check. Accept a post-balance
+   of zero, one at least `Rent.minimum_balance(data_length)`, or one not smaller than
+   the pre-balance. Otherwise return
+   `InsufficientFundsForRent { account_index: 0 }`. In particular, an existing
+   under-minimum payer cannot pay a positive fee and remain nonzero below the minimum.
+5. Only after these checks succeed may fee-payer validation continue to staged nonce
+   advancement and account loading. Every error above is `P0`: neither the local fee
+   subtraction nor nonce advancement commits, and the replay cache is unchanged.
 
 [SOL-TXN-0026] After fee validation succeeds, the runtime **MUST** deduct the fee before
 program execution; an instruction failure **MUST NOT** refund that deduction.
@@ -503,9 +529,8 @@ the execution path has used them.
 | `InvalidAddressLookupTableOwner` | phase 3 | `P0` admission; `BF` replay |
 | `InvalidAddressLookupTableData` | phase 3 | `P0` admission; `BF` replay |
 | `InvalidAddressLookupTableIndex` | phase 3 | `P0` admission; `BF` replay |
-| `InvalidRentPayingAccount` | phase 8 or phase 11 | `P0` admission and `BF` replay at fee validation; `P2` after execution |
 | `DuplicateInstruction(i)` | phase 5 first repeated singleton setting at index `i` | `P0` admission; `BF` replay |
-| `InsufficientFundsForRent{account_index}` | phase 11, lowest failing account index | `P2` |
+| `InsufficientFundsForRent{account_index}` | phase 8 fee-payer rent check, index `0`; otherwise phase 11, lowest failing account index | phase 8: `P0` admission and `BF` replay, no fee or nonce advancement commits; phase 11: `P2` |
 | `MaxLoadedAccountsDataSizeExceeded` | phase 9 meter order | `P1` |
 | `InvalidLoadedAccountsDataSizeLimit` | phase 5 | `P0` admission; `BF` replay |
 | `UnbalancedTransaction` | phase 11 aggregate lamport check | `P2` |
@@ -520,7 +545,7 @@ executable-preparation capacity, and scheduling cancellation are local admission
 retry conditions. They are not protocol transaction results, consume no protocol
 resources, and cannot be committed as the status of a transaction in an accepted
 block. Serializable `TransactionError` compatibility variants such as `AccountInUse`,
-`CallChainTooDeep`, `MissingSignatureForFee`, `ClusterMaintenance`,
+`CallChainTooDeep`, `MissingSignatureForFee`, `InvalidRentPayingAccount`, `ClusterMaintenance`,
 `AccountBorrowOutstanding`, `InvalidWritableAccount`,
 `WouldExceedAccountDataTotalLimit`, `ResanitizationNeeded`,
 `ProgramExecutionTemporarilyRestricted`, `ProgramCacheHitMaxLimit`, and

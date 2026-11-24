@@ -241,7 +241,8 @@ slot, and a 32-byte parent block ID. The footer body is:
 
 A signer bitmap is version byte `0`, bit count as `u16` little-endian, then exactly
 `ceil(bit_count/8)` bytes. Bits are packed least-significant bit first and identify
-validators by the epoch rank map. Unused high bits in the last byte are zero.
+validators by the Section 15.2 consensus rank map for the certificate's slot epoch.
+Unused high bits in the last byte are zero.
 
 [SOL-SHD-0018] The component sequence **MUST** be one header, zero or more nonempty
 Entry batches, one footer, and one terminal alpentick Entry batch, in that order. The

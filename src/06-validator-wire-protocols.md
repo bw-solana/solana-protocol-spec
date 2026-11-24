@@ -306,8 +306,12 @@ the endpoint.
 
 [SOL-WIR-0013] A valid ContactInfo **MUST** contain only unique IPv4 addresses and
 unique socket keys, every socket index **MUST** be in range, and every address **MUST**
-be referenced. Port addition **MUST NOT** overflow; port zero, unspecified, multicast,
-and IPv6 endpoints **MUST** be rejected.
+be referenced. Port addition **MUST NOT** overflow, and any IPv6 address **MUST**
+invalidate the record. A zero port, unspecified IPv4 address, or multicast IPv4 address
+does not invalidate an otherwise well-formed signed record; that socket **MUST** instead
+be excluded from usable endpoints. Unknown socket keys retain their encoded fields but
+do not acquire a service meaning. Local address-space policy is separate from record
+sanitation.
 
 [SOL-WIR-0014] ContactInfo `wallclock` **MUST** be less than `10^15`. A peer used for
 Turbine or repair **MUST** advertise shred version `50093`. Unknown extension types
@@ -439,7 +443,7 @@ other validators to match it.
 ## 6.7 Repair
 
 Repair requests use a `u32` little-endian top-level discriminant. Variants `0..=6` are
-obsolete unsigned forms and are rejected. Variant 7 is a `Pong`; variants `8..=11`
+obsolete unsigned forms and are rejected. Variant 7 is a `Pong`; variants `8..=14`
 begin with this signed header:
 
 **Normative table.**
@@ -461,8 +465,11 @@ begin with this signed header:
 | `9` | HighestWindowIndex | `slot:u64, shred_index:u64` | 160 |
 | `10` | Orphan | `slot:u64` | 152 |
 | `11` | AncestorHashes | `slot:u64` | 152 |
+| `12` | ParentAndFecSetCount | `slot:u64, block_id[32]` | 184 |
+| `13` | FecSetRoot | `slot:u64, block_id[32], fec_set_index:u32` | 188 |
+| `14` | WindowIndexForBlockId | `slot:u64, shred_index:u32, block_id[32]` | 188 |
 
-[SOL-WIR-0020] The signature for variants `8..=11` **MUST** verify under the header
+[SOL-WIR-0020] The signature for variants `8..=14` **MUST** verify under the header
 sender over `LE(discriminant,4) || bytes[68..end]`; the signature field itself is
 omitted. The recipient **MUST** be the receiving identity and the timestamp **MUST** be
 within 600,000 milliseconds of current Unix time.
@@ -473,21 +480,55 @@ layout from Section 6.4, for a total of 132 bytes.
 
 **Normative table.**
 
-| Specialized response | Discriminant and exact payload before trailing nonce |
+| Specialized response | Exact fixed-integer payload; data responses append a nonce, Ping challenges do not |
 |---|---|
 | `AncestorHashesResponse::Hashes` | `LE(0,4)`, `u64` count, then at most 30 `(slot:u64,hash[32])` records |
 | `AncestorHashesResponse::Ping` | `LE(1,4)`, Ping `[128]` |
+| `BlockIdRepairResponse::ParentFecSetCount` | `LE(0,4), fec_set_count:u32, parent_slot:u64, parent_block_id[32], proof_bytes:u64`, then exactly `proof_bytes` bytes |
+| `BlockIdRepairResponse::FecSetRoot` | `LE(1,4), fec_set_root[20], proof_bytes:u64`, then exactly `proof_bytes` bytes |
+| `BlockIdRepairResponse::Ping` | `LE(2,4)`, Ping `[128]` |
 
-[SOL-WIR-0021] A repair response **MUST** end in the outstanding request's nonce and
+[SOL-WIR-0021] A repair data response **MUST** end in the outstanding request's nonce and
 match its request: WindowIndex requires the exact slot and index; HighestWindowIndex
 requires the exact slot and either an index not below the request or a data shred whose
 flags include LAST_IN_SLOT (`0xc0`, Chapter 9), at any index; Orphan permits at most 11
 responses with shred slot not above the request; AncestorHashes permits at most 30
 pairs. Every returned shred **MUST** pass Chapter 9 before use.
 
+A Ping challenge in any of the three response families is exactly 132 bytes and has
+**no** trailing request nonce. Verify its signed 32-byte token using Section 6.4 and
+answer with request-kind 7 Pong. It challenges endpoint reachability; it does not
+satisfy or consume an outstanding data request. Only an actual data response is matched
+to the request nonce and response budget.
+
 A HighestWindowIndex responder that holds the slot's metadata returns the shred at index
 `received - 1` when that index is not below the request or equals the slot's recorded
 last index; the second case produces the LAST_IN_SLOT response below the request.
+
+### 6.7.1 Block-ID repair verification
+
+Kinds 12 and 13 each request one specialized response of the corresponding kind above;
+kind 14 requests one ordinary data-shred response. A request's slot and block ID are
+retained locally with its nonce. A FecSetRoot request additionally retains the FEC-set
+count authenticated by ParentAndFecSetCount; this count is **not** sent in kind 13.
+
+**Normative algorithm. Block-ID response authentication.**
+
+1. For ParentFecSetCount require `1 <= fec_set_count <= 512`. Form
+   `parent_leaf = SHA256(LE(parent_slot,8) || parent_block_id || LE(fec_set_count,4))`.
+   Using Section 14.5's double-Merkle construction, verify its first 20 bytes at leaf
+   index `fec_set_count` against the requested block ID.
+2. For FecSetRoot require the retained count in `1..=512`, a requested
+   `fec_set_index` divisible by 32, and `leaf_index = fec_set_index/32 < fec_set_count`.
+   Verify the returned 20-byte leaf at `leaf_index` against that requested block ID.
+3. In either proof require exactly `20 * ceil(log2(fec_set_count + 1))` bytes, with
+   Section 14.5's sibling ordering, prefix, truncation, and odd-leaf duplication rules.
+   A missing/extra sibling, wrong response kind, or mismatched root is rejected.
+4. For WindowIndexForBlockId, require a data shred of the exact slot and index. Recover
+   its Chapter 9 Merkle root and compare its first 20 bytes with the FEC-set root
+   previously authenticated for this block ID and the containing FEC set. Then apply
+   the remaining shred checks before admitting it to reconstruction. A leader-signed
+   shred for another duplicate of the same slot does not satisfy this request.
 
 ## 6.8 Turbine carriage
 

@@ -13,8 +13,8 @@ requirements, not block-validity limits.
 | Domain | Limit | Epoch-`E` value | Governing section |
 |---|---|---:|---|
 | account state | account data length | `10,485,760` bytes | 4.1 |
-| account state | growth of one account in one instruction | `10,240` bytes | 4.2 |
-| account state | aggregate positive growth in one transaction | `20,971,520` bytes | 4.2 |
+| SBF input ABI v1 | growth over invocation-entry account length | `10,240` bytes | 12.8.6 |
+| account state | signed net transaction resize-counter ceiling | `20,971,520` bytes | 4.2 |
 | derived address | seeds / bytes per seed | `16` / `32` | 5.5 |
 | UDP / TPU-vote transaction | application datagram or serialized transaction | `1,232` bytes | 6.1, 6.6, 7.2 |
 | gossip | combined CRDS values in push/pull response | `1,188` bytes | 6.2 |
@@ -32,6 +32,7 @@ requirements, not block-validity limits.
 | Alpenglow QUIC | ALPN / application carriage | `alpenglow-v1` / DATAGRAM only | 6.6.1 |
 | repair | signed-request timestamp distance | `600,000` ms | 6.7 |
 | repair | Orphan responses / AncestorHashes pairs | `11` / `30` | 6.7 |
+| block-ID repair | maximum proof depth / proof bytes | `10` siblings / `200` bytes | 6.7.1 |
 | Turbine | fanout / maximum hops in epoch `E` | `200` / `4` | 6.8 |
 | transaction | required signatures | `1..=12` | 7.2 |
 | transaction | legacy and version-0 / version-1 serialized size | `1,232` / `4,096` bytes | 7.2 |
@@ -70,7 +71,7 @@ requirements, not block-validity limits.
 | invocation | complete instruction trace | `64` entries | 12.4 |
 | CPI | account metas / account-info records | `255` / `255` | 12.4 |
 | CPI | signer-seed groups / instruction data | `16` / `10,240` bytes | 12.4 |
-| SBF | text instructions / local call depth | `65,536` / `64` | 12.8.1–12.8.2 |
+| SBF | local call depth; no separate text-instruction-count ceiling | `64` | 12.8.1–12.8.2 |
 | SBF | accepted ISA versions | V0 through V3 | 12.8.3 |
 | SBF | stack frame / allocated stack | `4,096` / `262,144` bytes | 12.8.1, 12.8.4 |
 | SBF | meter checkpoint distance | `10,000` instructions | 12.8.1 |
@@ -84,10 +85,12 @@ requirements, not block-validity limits.
 | bounded sysvar | RecentBlockhashes records | `150` | 13.4 |
 | bounded sysvar | SlotHashes / StakeHistory records | `512` / `512` | 13.4 |
 | bounded sysvar | SlotHistory window | `1,048,576` slots | 13.4 |
+| footer clock | nanosecond-clock state / exact replacement balance | `8` bytes / `946,560` lamports | 13.5 |
 | accounts commitment | lattice elements | `1,024` `u16` values | 14.4 |
 | accounts commitment | lattice serialization | `2,048` bytes | 14.4 |
-| Alpenglow | Notar, Notar-fallback, Skip, and Finalize threshold | `>=60%` admitted stake | 15.3 |
-| Alpenglow | Fast-finalize threshold | `>=80%` admitted stake | 15.3 |
+| Alpenglow | Notar, Notar-fallback, Skip, and Finalize threshold | `>=60%` consensus-rank-map stake | 15.3 |
+| Alpenglow BLS | compressed public key / signature envelope / compressed PoP | `48` / `192` / `96` bytes | 5.7 |
+| Alpenglow | Fast-finalize threshold | `>=80%` consensus-rank-map stake | 15.3 |
 | Alpenglow | safe-to-notar / safe-to-skip thresholds | Section 15.5 exact `20%`, `40%`, and `60%` predicates | 15.5 |
 | Alpenglow | Notar-fallback targets per validator / certified blocks per slot | `3` / `4` | 15.3, 15.5 |
 | Alpenglow | leader window / reward-certificate delay | `4` / `8` slots | 15.4, 16.6.3 |

@@ -166,3 +166,160 @@ cannot produce a result under the 16-seed `create_program_address` ceiling.
 receiver **MUST** prove that the operation fits both the remaining input and the
 protocol-specific bound; allocation failure or host-width conversion **MUST NOT** change
 acceptance into partial decoding.
+
+## 5.7 Alpenglow BLS signatures and proof of possession
+
+This section defines the BLS variant used by consensus, reward certificates, and Vote
+Program BLS authorization. It is separate from the selectable SBF BLS syscall formats
+in Section 12.8.7. Public keys are in BLS12-381 G1; signatures and proofs of possession
+are in G2. Arithmetic uses these parameters.
+
+**Normative table. BLS parameters.**
+
+| Parameter | Exact value |
+|---|---|
+| base-field prime `p` | `0x1a0111ea397fe69a4b1ba7b6434bacd764774b84f38512bf6730d2a0f6b0f6241eabfffeb153ffffb9feffffffffaaab` |
+| subgroup order `q` | `0x73eda753299d7d483339d80809a1d80553bda402fffe5bfeffffffff00000001` |
+| G1 curve | `y^2 = x^3 + 4` over `Fp` |
+| G2 curve | `y^2 = x^3 + 4*(1+u)` over `Fp2`, where `u^2 = -1` |
+| G1 generator `g1`, compressed | `97f1d3a73197d7942695638c4fa9ac0fc3688c4f9774b905a14e3a3f171bac586c55e83ff97a1aeffb3af00adb22c6bb` |
+| message hash-to-G2 | RFC 9380 Section 8.8.2 `BLS12381G2_XMD:SHA-256_SSWU_RO_`, with the signature DST below and no augmentation |
+| signature DST | ASCII `BLS_SIG_BLS12381G2_XMD:SHA-256_SSWU_RO_POP_` |
+| proof-of-possession DST | ASCII `BLS_POP_BLS12381G2_XMD:SHA-256_SSWU_RO_POP_` |
+
+The hash-to-curve primitive is the random-oracle construction in
+[RFC 9380](https://www.rfc-editor.org/rfc/rfc9380.html#section-8.8.2): expand the exact
+message with XMD/SHA-256 and the selected DST, hash to two Fp2 elements, map with the
+specified simplified-SWU/isogeny map, add, and clear the cofactor. A raw SHA-256 digest,
+encode-to-curve variant, omitted `_RO_`, or different DST is not interchangeable.
+
+All coordinate limbs below are canonical 48-byte **big-endian** integers smaller than
+`p`. For `a = a0 + a1*u`, the wire order is `a1 || a0`. The first byte reserves bit 7
+for compression, bit 6 for infinity, and bit 5 for the compressed root-selection sign.
+Remove these flags before reading that coordinate limb. For finite compressed points,
+the sign selects the lexicographically larger `y` when set; Fp2 comparison considers
+`y1` before `y0`. In the uncompressed coordinate form, compression and sign bits are
+zero. The fixed 192-byte signature envelope also accepts the compressed-prefix form
+specified below; its length alone does not select uncompressed coordinate decoding.
+
+**Normative table. BLS encodings, with no length prefix or padding.**
+
+| Value | Exact layout | Size |
+|---|---|---:|
+| compressed G1 public key | `x`, with compression bit set and sign bit selecting `y` | 48 bytes |
+| compressed G2 proof of possession | `x1 || x0`, with compression/sign flags in `x1[0]` | 96 bytes |
+| G2 vote or certificate signature, usual coordinate form | `x1 || x0 || y1 || y0` | 192 bytes |
+| G2 vote or certificate signature, accepted compressed-prefix form | compressed G2 point in bytes `[0,96)`; bytes `[96,192)` are ignored by point decoding but remain part of the fixed wire field | 192 bytes |
+| infinity, compressed | first byte `c0`, all remaining bytes zero | group's compressed size |
+| infinity, uncompressed | first byte `40`, all remaining bytes zero | group's uncompressed size |
+
+To decode a 192-byte signature, inspect byte zero: if bit 7 is set, decode only its
+first 96 bytes as compressed G2; otherwise decode the complete uncompressed form.
+This includes compressed infinity with an ignored 96-byte suffix. Producers normally
+serialize uncompressed coordinates, but receivers must accept both forms; treating
+the suffix as zero padding or rejecting a valid compressed prefix would narrow the
+active verification behavior.
+
+Reject noncanonical field limbs/flags in the selected point representation, failed
+point decompression, points off the curve, and points outside the order-`q` subgroup.
+Public keys must additionally be nonidentity.
+The signature decoder permits the canonical identity encoding; acceptance still
+requires the pairing equation below. An implementation must not replace subgroup
+validation with mere curve membership or reject extra valid encodings based on its
+internal point representation.
+
+**Normative algorithm. Signature and aggregate verification.**
+
+1. For one message `m`, decode public key `P` and signature `sigma`; require
+   `e(P, HashToG2(m, signature_DST)) = e(g1, sigma)` in the order-`q` target group.
+2. For a certificate with one payload, add the public keys selected by its signer map
+   in G1 and apply the same equation. The signer set must be nonempty and its sum must
+   be nonidentity. The keys must come from the PoP-validated Section 15.2 rank map.
+3. For a base-3 certificate, partition signers into the primary and fallback payload
+   groups specified in Section 15.2. Require a nonempty union and a nonidentity sum for
+   each nonempty group. Verify
+   `e(P_primary, HashToG2(m_primary)) * e(P_fallback, HashToG2(m_fallback))
+   = e(g1, sigma)`, omitting an empty group. Verify the aggregate actually supplied;
+   no individual constituent signatures are recoverable from it. Apply the certificate's
+   stake threshold separately after signature verification.
+
+Here `e` is the BLS12-381 pairing with final exponentiation; bilinearly equivalent
+pairing implementations give the same equality. Aggregate signatures are sums in G2,
+not concatenations or hashes. Consensus payload bytes are defined only in Section 15.2.
+
+**Normative algorithm. Vote-account proof of possession.**
+
+For vote account address `V[32]`, stored compressed key `K[48]`, and proof `pi[96]`,
+hash the exact 89-byte message `ASCII("ALPENGLOW") || V || K` to G2 with the PoP DST.
+Decode `K` and `pi` with the compressed formats above and verify
+`e(K, HashToG2(message, PoP_DST)) = e(g1, pi)`. The Vote Program charges its additional
+34,500 CU before verification and reports `InvalidArgument` for a malformed key/proof
+or false equation. The account address binding is required; a PoP for another vote
+account does not authorize the same key here. Once stored through this transition,
+epoch rank construction validates the key encoding but does not rerun the PoP.
+
+## 5.8 Ristretto proof arithmetic and transcripts
+
+The ZK ElGamal program uses the ristretto255 group and canonical 32-byte point
+encoding in [RFC 9496 Section 4](https://www.rfc-editor.org/rfc/rfc9496.html#section-4).
+Decode with its canonical field, sign, square-root, and identity rules, not Edwards
+point decoding. Scalars are 32-byte little-endian integers strictly less than
+`l = 2^252 + 27742317777372353535851937790883648493`. Scalar arithmetic below is
+modulo `l`; `0` denotes the group identity when used as a point.
+
+**Normative table. ZK group parameters.**
+
+| Name | Definition |
+|---|---|
+| `G` | canonical Ristretto generator, compressed hex `e2f2ae0a6abc4e71a884a961c500515f58e30b6aa582dd8db6a65945e08d2d76` |
+| `Map64(b)` | ristretto255 element derivation from exactly 64 uniform bytes, RFC 9496 Section 4.3.4 |
+| `H` | `Map64(SHA3-512(compress(G)))`; SHA3-512 is FIPS 202 SHA3, not Keccak-512 |
+| Pedersen commitment | `C = x*G + r*H`, for value scalar `x` and opening scalar `r` |
+| ElGamal key and ciphertext | for nonzero secret `s`, `P = s^-1*H`; ciphertext `(C,D)` has `D=r*P`, so `C-s*D=x*G` |
+| range generators `G_i`, `H_i` | separately squeeze SHAKE256 streams seeded by ASCII `GeneratorsChainG` and `GeneratorsChainH`; map each consecutive 64-byte block with `Map64`, starting at index zero |
+
+Proof transcripts use Merlin v1.0 framing over STROBE-128 v1.0.2. These are algorithm
+identifiers, not a choice of serializer or dependency version. The following defines
+the exact subset required here; all text labels are ASCII, with no terminator.
+
+**Normative table. STROBE state and operations.**
+
+| Item | Definition |
+|---|---|
+| state | 200 bytes `S`, byte positions `pos`, `begin`, and current operation flags; rate `R=166` bytes |
+| permutation | Keccak-f[1600], interpreting each consecutive eight state bytes as a little-endian lane, standard 24 rounds |
+| initialization | zero `S`; set `S[0..6] = 01 a8 01 00 01 60`, `S[6..18] = ASCII("STROBEv1.0.2")`; permute; set positions/flags to zero; perform meta-AD of `Merlin v1.0` |
+| `F()` | XOR `begin` into `S[pos]`, `04` into `S[pos+1]`, and `80` into `S[167]`; permute; reset `pos=begin=0` |
+| absorb bytes | XOR each byte into `S[pos]`, increment `pos`; run `F()` whenever `pos==166` |
+| begin operation `(flags, more)` | if `more`, require the same flags and continue without a header. Otherwise save `old=begin`, set `begin=pos+1` and current flags, absorb `[old,flags]`; if flag `04` is set and `pos!=0`, run `F()` |
+| meta-AD | begin with flags `12` hex, then absorb the supplied bytes |
+| AD | begin with flags `02` hex, then absorb the supplied bytes |
+| PRF | begin with flags `07` hex; output `S[pos]`, zero that state byte, increment `pos`, and run `F()` at the rate boundary for each requested byte |
+
+**Normative algorithm. Merlin operations used by ZK proofs.**
+
+```text
+append(label, bytes):
+    meta-AD(label, more=false)
+    meta-AD(LE(length(bytes),4), more=true)
+    AD(bytes, more=false)
+
+challenge(label):
+    meta-AD(label, more=false)
+    meta-AD(LE(64,4), more=true)
+    b = PRF(64 bytes, more=false)
+    return integer_little_endian(b) mod l
+
+new_proof(instruction_label):
+    initialize STROBE as above
+    append("dom-sep", "solana-zk-elgamal-proof-program-v1")
+    append("dom-sep", instruction_label)
+```
+
+Appending a scalar uses its canonical 32 bytes; appending a point uses its canonical
+compressed 32 bytes; appending `u64` uses eight little-endian bytes. Each append and
+each challenge mutates the transcript. Challenges are consumed even when a subsequent
+equation does not use their value. No transcript operation includes Rust type names,
+instruction discriminants, account addresses, JSON, or host padding unless a proof's
+explicit input table includes those bytes. Section 13.3.9 specifies the complete
+instruction-specific transcript sequences and equations.

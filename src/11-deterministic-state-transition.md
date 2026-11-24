@@ -76,7 +76,7 @@ specified by Chapters 13 and 16.
 transaction processing, or freeze **MUST** be selected from the parent-derived bank's
 activation state at this slot.
 
-Stake-weighted timestamp and reward formulas are owned by Chapters 13 and 16; this
+Footer-clock and reward formulas are owned by Chapters 13 and 16; this
 chapter fixes their position in the transition.
 
 ## 11.3 Ordered transaction transition
@@ -221,7 +221,10 @@ transactions and child slots **MUST** be derived from the protocol queues after 
 ordered tick registrations, not from wall-clock time.
 
 [SOL-STA-0026] Freeze **MUST** occur only after the slot is complete and every accepted
-transaction result has been committed.
+transaction result has been committed. Before freeze, the validated footer **MUST**
+update Clock and the nanosecond-clock account under Section 13.5, then apply its vote
+rewards and finalization updates under Section 16.6.3. The footer bank-hash comparison
+occurs after those writes and freeze, not against the pre-footer state.
 
 [SOL-STA-0027] Freeze **MUST** distribute the slot's accumulated fees, update
 SlotHistory, process the incinerator account, finish all account-state accumulator
