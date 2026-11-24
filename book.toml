@@ -14,6 +14,8 @@ use-data-uris = true
 fail-on-error = true
 
 [output.html]
+# SUMMARY.md already includes the specification's chapter and appendix labels.
+no-section-label = true
 git-repository-url = "https://github.com/bw-solana/solana-protocol-spec"
 edit-url-template = "https://github.com/bw-solana/solana-protocol-spec/edit/master/{path}"
 site-url = "/solana-protocol-spec/"
