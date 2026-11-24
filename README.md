@@ -31,6 +31,10 @@ mdbook serve --open
 For a static build, run `mdbook build`. The navigable book is written to `book/`, and
 `book/print.html` contains the complete specification as one printable page.
 
+Prose and tables share a responsive content column. Oversized tables scroll within
+that column instead of extending into the page margins. The layout is defined in
+`theme/wide-tables.css`.
+
 Keep diagrams in fenced `plantuml` blocks in the chapter Markdown. The build renders
 them locally as embedded SVG images, including in the printable specification; readers
 do not need JavaScript or access to an external diagram service. Invalid diagrams fail
