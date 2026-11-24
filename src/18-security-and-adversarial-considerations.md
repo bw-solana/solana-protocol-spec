@@ -22,6 +22,9 @@ erasure-set, and block limits protect both deterministic accounting and liveness
 Implementations can reject work earlier for locally exhausted resources only where doing
 so cannot change ledger validity or voting; a local overload drop is not evidence that
 the contained transaction or block is protocol-invalid.
+Chapter 19 records receiver-specific resource and admission profiles. Advertised QUIC
+credit is not an application-service guarantee, and matching another implementation's
+resource policy is not a validator conformance condition.
 
 ## 18.4 Duplicate data and equivocation
 

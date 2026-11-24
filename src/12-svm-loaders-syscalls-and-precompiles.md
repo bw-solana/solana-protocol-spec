@@ -271,7 +271,7 @@ vector; CPI-created instruction data **MUST NOT** be substituted into that vecto
 Every instruction failure is returned as `TransactionError::InstructionError(i,e)`,
 where `i` is the zero-based top-level message-instruction index even when the failure
 arose in CPI and `e` is one exact value from the table below. It is outcome `P2`: the
-full fee and any durable-nonce advance commit, replay protection records the message,
+full fee and any durable-nonce advance commit, replay protection follows Section 11.5,
 account writes roll back, consumed CU remains charged, and the failure is
 transaction-level rather than block-fatal. Logs and the final return-data buffer are not
 committed protocol outputs.

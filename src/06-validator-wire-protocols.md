@@ -184,30 +184,13 @@ different indexed labels. In particular, EpochSlots is a logical union only when
 consumed: decode each surviving indexed value, union selected slots for the origin,
 remove duplicates, and order the resulting slots ascending.
 
-Push accepts a signed value only when its wallclock is in the inclusive window
-`[now-15,000 ms, now+15,000 ms]`. Pull accepts a caller ContactInfo only when its
-wallclock is in the half-open window `[now-15,000 ms, now+15,000 ms)`. One
-responder-wide random jitter `j` in `0..3,750 ms` is added to the caller wallclock; a
-pull response selects, in table insertion order, nondeprecated values matching the
-requested partition, absent from the Bloom filter, satisfying
-`value.wallclock <= caller+j`, and fitting the response byte budget. A receiver inserts
-an otherwise-new pull value if `now <= value.wallclock + timeout(origin)`; an expired
-value may be retained only when ContactInfo for its origin already exists, so it can
-assist replacement and purge decisions.
-
-The default origin timeout is `15,000 ms`. The local identity never expires. An identity
-with positive epoch stake uses `max(15,000 ms, epoch_duration_ms)`; when every supplied
-stake is zero, all identities use that extended timeout. If an origin's ContactInfo has
-`min(value.wallclock, local_receive_time)+timeout > now`, every label of that origin is
-retained. Otherwise each label expires when the same expression is `<= now`. Displaced
-and rejected-outdated hashes remain in pull Bloom filters for `20,000 ms`.
-
-The preceding windows, insertion-order response selection, retention timeouts, and
-Bloom-filter retention describe the active network's liveness profile. They are
-informative: local time and peer observation are not replicated state, and a different
-safe retention or selection policy does not make a bank invalid. Signed-value
-constraints, labels, replacement order, filter partitioning, response byte grammar,
-and receiver-side revalidation remain normative.
+Wallclock admission windows, insertion-order response selection, retention timeouts,
+and Bloom-filter retention are receiver policy. Section 19.4 documents an
+implementation-specific profile for peers communicating with such a receiver. Local
+time and receipt history are not replicated state; a different safe retention or
+selection policy does not change bank validity. Signed-value constraints, labels,
+replacement order, filter partitioning, response byte grammar, and receiver-side
+revalidation remain shared protocol requirements.
 
 [SOL-WIR-0009] Push duplicate suppression, pull selection, expiration, and purge
 **MAY** vary without changing protocol state. A pull response **MUST** contain only
@@ -217,17 +200,13 @@ apply `SOL-WIR-0007` and `SOL-WIR-0008`. Completed DuplicateShred evidence **MUS
 follow `SOL-WIR-0006`; incomplete assembly may be evicted at any time and has no
 consensus effect.
 
-The push active set contains 12 peers per stake bucket and sends each eligible new value
-to the first nine unpruned peers. There are 25 buckets. For stake `s` lamports define
-`b(s)=min(24, bit_length(floor(s/1,000,000,000)))`; a value owned by `o` uses bucket
-`min(b(local_stake),b(stake(o)))`. Peer sampling is without replacement with weight
-`(min(peer_bucket,bucket)+1)^2`; zero-weight peers follow positive-weight peers. A valid
-Prune applies only at its named destination, only within `500 ms` of local time, and
-marks each named origin as suppressed for pushes to the prune sender in the applicable
-bucket. A node's own values are never suppressed by a prune false positive.
+A Prune applies only at its named destination and suppresses the named origins for
+pushes to the prune sender. Freshness windows and the active-set, bucket, sampling,
+rotation, and fanout policies are implementation-specific; Section 19.4 describes one
+profile. A node's own values are not suppressed by a prune false positive.
 
 [SOL-WIR-0010] A sender **MUST** honor authenticated, timely prune state. Active-set
-size, stake buckets, sampling, rotation timing, and fanout cap are informative liveness
+size, stake buckets, sampling, rotation timing, and fanout cap are local liveness
 policy. A sender **MUST NOT** send a value to a peer for which the applicable prune
 filter positively contains that origin, except its own origin as stated above.
 
@@ -344,94 +323,62 @@ TPU-forward, or TPU-vote QUIC connection **MUST** negotiate the ten-byte ALPN
 `solana-tpu`, and each completed requester-initiated unidirectional stream **MUST**
 contain exactly one transaction. The stream is nonempty and consumes all bytes. On TPU
 and TPU-forward it is at most 4,096 bytes; on TPU-vote it is at most 1,232 bytes, and a
-longer TPU-vote stream is an invalid stream (close code `5`). Chapter 7 then applies the
+longer TPU-vote stream is an invalid application message. Chapter 7 then applies the
 format-specific transaction limit: 1,232 bytes for legacy and version 0, or 4,096 bytes
 for version 1. The UDP form remains limited to 1,232 bytes by Section 6.1.
 
 [SOL-WIR-0016] A TPU receiver **MUST** pass only QUIC's ordered, reassembled bytes from
 one completed unidirectional stream to the transaction decoder. It **MUST** reject a
 bidirectional stream, QUIC datagram application data, or bytes concatenated across
-streams. A packet gap leaves the stream incomplete until QUIC retransmission or timeout;
-it is not an application decode error. Transport certificates do not authorize a
-transaction; Chapter 7 signatures do.
+streams. A sender **MUST** obey the receiver's advertised QUIC connection, stream-data,
+and stream-count limits, including subsequent credit updates, rather than assume a
+fixed receive window, stream allocation, or stake quota. A packet gap leaves the stream
+incomplete until QUIC retransmission or timeout; it is not an application decode error.
+Transport certificates do not authorize a transaction; Chapter 7 signatures do.
 
-**Informative table. Active QUIC liveness and resource profile.**
+**Normative table. Shared TPU transport requirements.**
 
-| Parameter | Required value or accepted domain |
+| Parameter | Required value or behavior |
 |---|---|
-| QUIC TLS version | TLS 1.3 only, as required by QUIC v1 |
-| Key exchange | X25519 |
-| TLS 1.3 cipher suites | accept AES-128-GCM-SHA256, AES-256-GCM-SHA384, and ChaCha20-Poly1305-SHA256 |
+| QUIC and TLS | QUIC version 1 with TLS 1.3 |
 | ALPN | exactly `solana-tpu` |
-| Per-stream receive window and application hard cap | `4,096` bytes (TPU, TPU-forward); `1,232` bytes (TPU-vote) |
-| Connection receive window | `8,388,608` bytes |
-| Initial bidirectional-stream limit | `0` |
-| Initial unidirectional-stream limit | `0`, raised after handshake/QoS classification |
-| Concurrent inbound unidirectional streams | after handshake, the exact stake-and-RTT formula below; possible advertised values are unstaked `128..=896` and staked `128..=3,584` streams |
-| Idle timeout | `30` seconds |
-| Handshake timeout | `2` seconds from receipt of Initial through receipt of Handshake |
-| Incomplete-stream chunk timeout | `2` seconds |
-| QUIC DATAGRAM | disabled |
-| Path migration | disabled |
-| 0-RTT | server acceptance disabled; clients may attempt resumption but application bytes are processed only after a completed handshake |
-| Default connection admission | at most `2,000` staked and `2,000` unstaked connections; `16` per staked identity and `8` per unstaked IP |
-| Per-source connection rate | `8` new connections per source IP per minute with burst capacity `80`; all sources together `2,500` connections/second with burst capacity `1,000` |
-| Stream arrival throttle | `500` new streams per millisecond |
+| Application carriage | one complete transaction per requester-initiated unidirectional stream |
+| Application-message size | Section 6.6 limits above and the format-specific limits in Chapter 7 |
+| Bidirectional streams and QUIC DATAGRAM | not used for transaction application data |
+| Early data | transaction application bytes are processed only after a completed authenticated handshake |
 
-Let `peer_stake` and `total_stake` be unsigned epoch-stake lamports and let
-`rtt_ms = min(floor(measured_RTT_in_microseconds / 1000),350)`. Compute the
-post-handshake unidirectional-stream limit with unsigned floor arithmetic:
-
-**Normative algorithm.**
-
-```text
-if peer is unstaked:
-    base = 128
-else if total_stake == 0 or peer_stake > total_stake:
-    base = 128
-else:
-    base = clamp(floor(binary64(peer_stake) / binary64(total_stake) * 99872)
-                 + 128,
-                 128, 512)
-
-stream_limit = floor(base * clamp(rtt_ms,50,350) / 50)
-```
-
-The two integer stake values are converted separately to IEEE-754 binary64; the quotient
-and multiplication are binary64 round-to-nearest-ties-to-even, and conversion to `u32`
-truncates toward zero before adding `128`. The final multiply saturates in `u32` before
-integer division.
-
-The canonical active sender profile presents one Ed25519 end-entity certificate. Its
-DER certificate is 249 bytes: the fixed X.509 template has Ed25519 OID `1.3.101.112`,
-serial `01` repeated
-eight times, issuer CN `Solana node`, validity 1970-01-01 through 4096-01-01, empty
-subject, a critical DNS SAN `localhost`, critical empty basic constraints, and a
-deliberately invalid 64-byte all-`ff` certificate signature. The only variable
-certificate bytes are the 32-byte Ed25519 SubjectPublicKeyInfo. The corresponding PKCS#8
-private key is the 16-byte prefix `30 2e 02 01 00 30 05 06 03 2b 65 70 04 22 04 20`
-followed by the 32-byte Ed25519 secret scalar.
-
-**Informative table. Canonical dummy-certificate byte construction.**
-
-| Byte range | Exact bytes |
-|---|---|
-| `[0,100)` | `30 81 f6 30 81 a9 a0 03 02 01 02 02 08 01 01 01 01 01 01 01 01 30 05 06 03 2b 65 70 30 16 31 14 30 12 06 03 55 04 03 0c 0b 53 6f 6c 61 6e 61 20 6e 6f 64 65 30 20 17 0d 37 30 30 31 30 31 30 30 30 30 30 30 5a 18 0f 34 30 39 36 30 31 30 31 30 30 30 30 30 30 5a 30 00 30 2a 30 05 06 03 2b 65 70 03 21 00` |
-| `[100,132)` | the identity's 32 raw Ed25519 public-key bytes |
-| `[132,249)` | `a3 29 30 27 30 17 06 03 55 1d 11 01 01 ff 04 0d 30 0b 82 09 6c 6f 63 61 6c 68 6f 73 74 30 0c 06 03 55 1d 13 01 01 ff 04 02 30 00 30 05 06 03 2b 65 70 03 41 00 ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff` |
+Connection admission, receive-window allocation, stream-credit allocation, load
+estimation, throttling, timeouts, and application close codes are receiver policy.
+[Chapter 19](19-implementation-specific-interoperability-profiles.md) documents named
+implementation profiles for senders that need to anticipate these behaviors. Those
+profiles are not requirements for other validator implementations.
 
 Certificate-chain, issuer, time, SAN, SNI and certificate-signature validation are
 deliberately not trust anchors. The TLS 1.3 CertificateVerify signature under the
 certificate public key is mandatory. A server extracts a peer identity for stake QoS
-only from a one-certificate chain whose SPKI is exactly 32 Ed25519 bytes; failure to
-extract it classifies the peer as unstaked rather than authenticating a transaction. A
-requester supplies SNI `<decimal-IP>.<decimal-port>.sol`; the responder does not match
-it to the SAN.
+only from a one-certificate chain whose complete SubjectPublicKeyInfo has the following
+44-byte encoding. Its offsets are relative to the SPKI, not the certificate.
+
+**Normative table. Transport-identity SubjectPublicKeyInfo.**
+
+| Byte range | Field | Exact encoding |
+|---|---|---|
+| `[0,12)` | DER sequence, Ed25519 algorithm identifier, and bit-string header | `30 2a 30 05 06 03 2b 65 70 03 21 00` |
+| `[12,44)` | node identity | 32 raw Ed25519 public-key bytes |
+
+Identity extraction **MUST** use the same parsed certificate and SPKI whose key
+verifies TLS CertificateVerify. The Ed25519 algorithm identifier has no parameters;
+a different algorithm, malformed DER, another SPKI length, or a different prefix
+does not yield a Solana identity. Failure to extract an identity classifies a TPU
+peer as unstaked if the TLS handshake otherwise succeeds. The fixed sender template in
+Section 19.2.4 is not required, and a receiver does not recover the key at a fixed
+offset in every accepted certificate. SNI is not matched to the certificate SAN;
+sender-specific SNI construction is also documented in Section 19.2.4.
 
 [SOL-WIR-0017] Both endpoints **MUST** verify TLS handshake signatures and **MUST**
 require client authentication at the handshake, while ignoring PKI chain, name, time,
-and dummy-certificate-signature validation as described above. A transport identity
-**MUST NOT** replace transaction signatures.
+and dummy-certificate-signature validation. A transport identity **MUST NOT** replace
+transaction signatures.
 
 [SOL-WIR-0018] A requester **MUST** finish each transaction stream. EOF after
 `1..=4,096` bytes delivers one packet to the Chapter 7 decoder; reset, stop, timeout,
@@ -441,19 +388,14 @@ between streams discards that stream without an application response. A responde
 opening a new stream or connection and **MUST NOT** infer transaction acceptance from
 transport completion.
 
-**Informative table. QUIC application close codes in the active liveness profile.**
-
-| Code | UTF-8 reason | First use |
-|---:|---|---|
-| `1` | `dropped` | an admitted connection-table entry is displaced |
-| `2` | `disallowed` | peer or connection classification is not admitted |
-| `4` | `too_many` | the applicable connection limit is exceeded |
-| `5` | `invalid_stream` | an empty or oversized transaction stream is received |
+Section 19.2.5 documents one implementation's application close codes. These are not
+transaction errors, and other receivers can use different close codes or stream resets.
 
 Repair and TVU use UDP in epoch `E`; their recognized QUIC socket keys do not select
 this TPU ALPN or transaction stream grammar. TPU, TPU-forward, and TPU-vote QUIC differ
-only in advertised endpoint, per-stream size cap, and downstream transaction
-classification. TPU-vote additionally accepts the UDP form above.
+in advertised endpoint, per-stream size cap, downstream transaction classification,
+and receiver-specific admission policy. TPU-vote additionally accepts the UDP form
+above.
 
 ### 6.6.1 Alpenglow votor QUIC datagrams
 
@@ -466,25 +408,20 @@ is independent of TPU transaction ingestion.
 |---|---|
 | QUIC version | version 1 |
 | TLS version | TLS 1.3 |
-| TLS 1.3 cipher suites | AES-128-GCM-SHA256, AES-256-GCM-SHA384, and ChaCha20-Poly1305-SHA256 |
 | ALPN | ASCII `alpenglow-v1` |
 | application carriage | QUIC DATAGRAM only |
-| bidirectional and unidirectional streams | disabled; initial limits are zero |
-| path MTU | `1,280` bytes; path-MTU discovery disabled |
-| connection migration | disabled |
-| idle timeout | `5` seconds |
-| keepalive interval | `2` seconds |
+| QUIC streams | not used for consensus application messages |
 | 0-RTT | disabled |
 | peer identity | node-identity Ed25519 public key extracted from the mutually authenticated certificate |
 | peer admission | identity must belong to the admitted staked-node set for the relevant epoch window |
-| inbound connections per admitted peer | at most `2` |
 
-Certificate construction and acceptance use the identity-certificate rules in Section
-6.6. The TLS CertificateVerify signature binds possession of the advertised node
-identity. A certificate whose Ed25519 public key cannot be extracted, or whose identity
-is not in the admitted staked-node set, does not create an unstaked Alpenglow peer; the
-connection is rejected. Vote verification maps that node identity to its vote-account
-rank, effective stake, and BLS public key for the target slot's epoch.
+Certificate acceptance uses the identity-certificate rules in Section 6.6; a fixed
+sender certificate template is not required. The TLS CertificateVerify signature binds
+possession of the advertised node identity. A certificate whose Ed25519 public key
+cannot be extracted, or whose identity is not in the admitted staked-node set, does
+not create an unstaked Alpenglow peer; the connection is rejected. Vote verification
+maps that node identity to its vote-account rank, effective stake, and BLS public key
+for the target slot's epoch.
 
 [SOL-WIR-0019] An Alpenglow endpoint **MUST** negotiate the transport profile above,
 **MUST NOT** accept consensus messages on a QUIC stream, and **MUST NOT** accept early
@@ -493,10 +430,11 @@ shred version, has an unknown version or kind, or exceeds the negotiated datagra
 Transport receipt is not a vote: Chapter 15 signature, rank, and stake checks remain
 mandatory.
 
-The datagram payload uses the `ALPENGLOW-WIRE-E1072` codec in Section 15.2. QUIC
-connection counts, handshake-rate governors, send retry intervals, and queue capacities
-beyond the interoperability values above are local liveness policy rather than consensus
-or ledger validity rules.
+The datagram payload uses the `ALPENGLOW-WIRE` codec in Section 15.2. Connection
+counts, flow-control and buffer allocation, path-MTU choices, timeouts, keepalive,
+handshake-rate governors, send retry intervals, and queue capacities are local liveness
+policy. Section 19.5 documents one implementation's transport tuning without requiring
+other validators to match it.
 
 ## 6.7 Repair
 

@@ -1,6 +1,6 @@
 # Solana Protocol Specification
 
-Mainnet reference epoch: `E = 1072`
+Mainnet reference epoch: `E = 1095`
 
 ## Table of contents
 
@@ -22,6 +22,7 @@ Mainnet reference epoch: `E = 1072`
 16. [Epochs, leader schedule, stake, fees, and rewards](16-epochs-leader-schedule-stake-fees-and-rewards.md)
 17. [Feature activation, versioning, and hard forks](17-feature-activation-versioning-and-hard-forks.md)
 18. [Security and adversarial considerations](18-security-and-adversarial-considerations.md)
+19. [Implementation-specific interoperability profiles](19-implementation-specific-interoperability-profiles.md)
 
 Appendices:
 
@@ -36,4 +37,4 @@ Appendices:
 
 | Epoch for feature activation | SIMD links | Change description |
 |---:|---|---|
-| `1072` | [Feature-linked SIMDs](appendix-c-mainnet-feature-manifest.md) | Baseline specification. |
+| — | [Feature-linked SIMDs](appendix-c-mainnet-feature-manifest.md) | Baseline specification; the reference epoch is declared above. |

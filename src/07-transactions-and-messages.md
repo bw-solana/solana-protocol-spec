@@ -285,7 +285,10 @@ require the bank's next durable nonce to differ from the stored value.
 
 [SOL-TXN-0016] The runtime **MUST** reject a transaction already present in the
 applicable replay-protection relation for the same message hash and recent blockhash
-before account execution.
+before account execution. Section 11.5 defines which processed transactions enter that
+relation; durable-nonce transactions instead obtain replay protection from nonce
+advancement. A transaction accepted through an ordinary recent blockhash remains an
+ordinary blockhash transaction even if instruction zero has the nonce-marker shape.
 
 ## 7.6 Compute-budget instructions and fees
 
@@ -413,8 +416,8 @@ Otherwise set `total=total+item` and fail when `total > limit`; equality succeed
 | 1 | Each address-table descriptor in message lookup order | `8,248` bytes, once per descriptor, including repeated table addresses |
 | 2 | Existing fee-payer account | `64 + data_length` bytes |
 | 3 | Remaining resolved keys in `K` order | for each existing nonzero-lamport account, `64 + data_length` bytes |
-| immediately after its Program key | Separately loaded upgradeable-loader-v3 ProgramData | `64 + programdata_data_length` bytes when it exists, is not itself in `K`, and has not already been added through another Program |
-| any key | Missing or zero-lamport account synthesized as default | `0` bytes |
+| immediately after its Program key | Implicit upgradeable-loader-v3 ProgramData address, absent from `K` and not already charged through another Program | `64 + max(45, D)` bytes, where `D` is the current bank account's data length if it exists with nonzero lamports, otherwise `0` |
+| ordinary key in `K` | Missing or zero-lamport account synthesized as default | `0` bytes; the implicit ProgramData charge is a separate case |
 | instructions sysvar | Synthesized account | `0` bytes |
 | builtin/native program account named in `K` | Ordinary existing account | `64 + data_length` bytes; no additional cache or executable charge |
 | loaded ALT address | Target account | no address-only charge; its target account is charged by the ordinary `K` rule |
@@ -423,19 +426,35 @@ Otherwise set `total=total+item` and fail when `total > limit`; equality succeed
 The `64` bytes are account-loading overhead and are not part of account data. The set
 used to deduplicate extra ProgramData addresses is initialized with all of `K`, so an
 explicitly named ProgramData account is charged exactly once at its position in `K`.
-ProgramData deduplication is across every referencing Program. Failure to find the
-referenced ProgramData does not add bytes; the later program-state/owner check returns
-the applicable program-loading error.
+ProgramData deduplication is across every referencing Program. An explicitly named
+ProgramData account follows the ordinary account rule, without the implicit 45-byte
+floor; merely being referenced by a Program does not charge it again.
+
+The implicit charge applies to each nonzero-lamport account owned by the Upgradeable
+BPF Loader whose data decodes as Program state, even when no instruction invokes that
+Program. Decode its ProgramData address, then apply the charge at the position shown
+above. The `45` bytes are the maximum serialized ProgramData metadata size, not an
+additional header added to `D`. Thus an eligible missing, zero-lamport, empty, or
+shorter-than-45-byte ProgramData account costs `109` loaded bytes. A live account with
+at least 45 data bytes costs `64 + D` bytes. Account owner, ProgramData state validity,
+and ELF validity do not affect this length charge. A malformed Program state produces
+no implicit ProgramData charge.
+
+The implicit ProgramData lookup does not by itself reject an absent or malformed
+ProgramData account. First check the loaded-data limit after its charge; if that
+succeeds, a later attempted invocation can fail with `UnsupportedProgramId` under
+SOL-TXN-0029. The size floor affects the loading meter, not account allocation, rent,
+the ProgramData byte layout, or the SBF execution meter.
 
 [SOL-TXN-0032] The meter **MUST** add lookup overhead before the fee payer, then load
-the fee payer, then remaining keys in `K` order, adding an eligible extra ProgramData
-account immediately after the Program that refers to it. It **MUST** check the limit
+the fee payer, then remaining keys in `K` order, adding an eligible implicit ProgramData
+charge immediately after the Program that refers to it. It **MUST** check the limit
 after every addition and **MUST NOT** count account data twice just because the key is
 referenced by multiple instructions.
 
 [SOL-TXN-0033] A meter failure after successful fee deduction **MUST** be a fee-only
 committed transaction. It charges the complete fee; commits durable nonce advancement
-when the transaction used one; records the transaction identity in replay protection;
+when the transaction used one; updates replay protection according to Section 11.5;
 executes no instruction; consumes `0` execution compute units; records loaded bytes as
 `min(total,limit)` when `total` is representable and `limit` after overflow; and is a
 transaction-level result. During block replay it is not by itself block-fatal.
@@ -450,8 +469,8 @@ exact error but does not repeat every observable effect.
 | Class | Fee charged | Durable nonce | Replay protection | Execution CU | Production disposition | Replay disposition |
 |---|---|---|---|---|---|---|
 | `P0` pre-fee rejection | no | unchanged | unchanged | `0` CU | omit the transaction | `BF`: a block containing it is invalid |
-| `P1` fee-only load failure | full fee | advancement commits | identity recorded | `0` execution CU | record the failed transaction | committed transaction-level failure |
-| `P2` executed failure | full fee | advancement commits | identity recorded | actual CU through failure; full requested CU for a depleting SBF VM failure under Section 12.8.9 | record the failed transaction | committed transaction-level failure |
+| `P1` fee-only load failure | full fee | advancement commits | ordinary blockhash identity recorded; durable nonce protected by advancement (11.5) | `0` execution CU | record the failed transaction | committed transaction-level failure |
+| `P2` executed failure | full fee | advancement commits | ordinary blockhash identity recorded; durable nonce protected by advancement (11.5) | actual CU through failure; full requested CU for a depleting SBF VM failure under Section 12.8.9 | record the failed transaction | committed transaction-level failure |
 | `BF` block-fatal | no additional debit beyond effects of earlier transactions already replayed | only effects of earlier committed transactions remain | candidate is not committed | no block result | do not produce the candidate | invalidate the candidate |
 
 For `P1` and `P2`, fee-payer and durable-nonce rollback accounts are committed as

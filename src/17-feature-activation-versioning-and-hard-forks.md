@@ -49,6 +49,12 @@ just because its account is owned by the Feature Gate program.
 
 The header identifies reference epoch `E`, and Appendix C lists the feature-linked SIMDs
 active by that epoch. Normative chapters state the resulting behavior directly.
+Advancing the reference epoch without changing that protocol configuration changes
+only the header's epoch line. Codec and requirement identifiers stay stable, while
+runtime epoch fields, rewards, and other state are derived by their governing rules.
+Activation epochs in Appendix C remain the epochs of the actual activations; they are
+not rewritten to match the header. A changed active feature set, hard-fork registration,
+or protocol-owned program requires updating the affected rules and records as well.
 
 [SOL-FTR-0005] Protocol behavior for a block at slot `s` **MUST** be selected from
 feature state in that block's ancestor-derived bank state, not from the wall clock, a

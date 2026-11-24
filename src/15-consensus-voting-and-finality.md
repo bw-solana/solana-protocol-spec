@@ -8,7 +8,7 @@ proofs, or heaviest-observed-subtree fork choice.
 
 ## 15.2 Consensus wire codec and signer set
 
-An `ALPENGLOW-WIRE-E1072` datagram is Wincode fixed-integer encoding with no alignment
+An `ALPENGLOW-WIRE` datagram is Wincode fixed-integer encoding with no alignment
 padding. It begins with outer-version byte `1`, then one kind record, then shred version
 `u16` little-endian. A block target is slot `u64` little-endian followed by its 32-byte
 block ID. Vote signatures are uncompressed BLS12-381 signatures of 192 bytes.

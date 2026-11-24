@@ -164,6 +164,9 @@ following program bytes.
 | `2` | Program | bytes `[4,36)` ProgramData address; metadata length `36` |
 | `3` | ProgramData | `[4,12)` last-deployment slot; byte `12` upgrade-authority option; `[13,45)` authority when present and ignored otherwise; SBF bytes begin at `45` |
 
+Section 7.7.1 defines the implicit ProgramData loading charge, including the metadata
+size floor and its treatment of missing accounts. It does not change these layouts.
+
 Management instruction data is another Section 5.3 fixed-integer enum:
 
 **Normative table.**

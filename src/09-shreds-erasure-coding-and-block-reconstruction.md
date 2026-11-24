@@ -185,7 +185,7 @@ candidate; padding outside each data shred's declared `size` never enters the de
 component.
 
 An ordinary DATA_COMPLETE component is independently framed as exactly one
-`ENTRY-E1072` outer sequence:
+`ENTRY` outer sequence:
 
 **Normative table. Deshredded component framing.**
 

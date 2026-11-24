@@ -198,32 +198,44 @@ The epoch inflation state is stored at
 `3vJzniWALu2qGFJ1ZY6JD3Y2ZmA5zWqmVdDX7yBXHgu7`. This is the off-curve program
 address derived with seed bytes `vote_reward_account`, bump `253`, and program ID
 `A1pengvuM6JEcyNuTnMqepBKhwHE3N6PmUrdATGawhJS`. The account is System-owned,
-nonexecutable, and rent-exempt. With the 49-byte epoch-`E` data and Section 3.1 rent
-parameters, its balance is exactly `899,160` lamports. Its data is the following
-Wincode fixed-integer record with no alignment padding.
+nonexecutable, and rent-exempt under the Section 13.4 rent parameters. Its data is
+the following `ALPENGLOW-STATE` fixed-integer record with no alignment padding.
 
-**Normative table. Epoch-`E` inflation-state account data.**
+Let `d` be the bank's actual epoch, `Q_d = slots(d)`, and `R_d` the reward budget
+calculated at that epoch's boundary by the algorithm below. These are runtime inputs
+and results, not the specification's reference epoch or fixed reference-state amounts.
+When a previous record is present, let `p` be its stored epoch, with budget `R_p` and
+epoch length `Q_p` retained from when that record was current.
 
-| Byte range | Field | Epoch-1072 value |
+**Normative table. Inflation-state account data.**
+
+| Byte range | Field | Value or interpretation |
 |---:|---|---:|
-| `[0,8)` | `current.max_possible_validator_reward:u64` LE | `62,395,745,304,053` lamports |
-| `[8,16)` | `current.slots_per_epoch:u64` LE | `432,000` slots |
-| `[16,24)` | `current.epoch:u64` LE | `1,072` |
-| `[24,25)` | previous-state option tag, `u8` | `1` |
-| `[25,33)` | `previous.max_possible_validator_reward:u64` LE | `62,417,544,028,268` lamports |
-| `[33,41)` | `previous.slots_per_epoch:u64` LE | `432,000` slots |
-| `[41,49)` | `previous.epoch:u64` LE | `1,071` |
+| `[0,8)` | `current.max_possible_validator_reward:u64` LE | `R_d` lamports |
+| `[8,16)` | `current.slots_per_epoch:u64` LE | `Q_d` slots, from Section 16.1 |
+| `[16,24)` | `current.epoch:u64` LE | `d` |
+| `[24,25)` | previous-state option tag, `u8` | `0` when absent; `1` when present |
+| `[25,33)` | `previous.max_possible_validator_reward:u64` LE | `R_p` lamports; present only for tag `1` |
+| `[33,41)` | `previous.slots_per_epoch:u64` LE | `Q_p` slots; present only for tag `1` |
+| `[41,49)` | `previous.epoch:u64` LE | `p`; present only for tag `1` |
 
 An option tag of `0` ends the record at byte 25; tag `1` requires the complete 24-byte
 previous state; every other tag, length, or trailing byte is invalid. At an epoch
 boundary, move the old current state to previous, calculate the new current state from
 the boundary capitalization and additional partitioned rewards below, serialize the
 record, and set the account balance to the exact rent-exempt minimum for its data size.
+The steady-state record with a previous entry is 49 bytes and has a rent-exempt
+balance of `899,160` lamports under the active rent parameters. A non-boundary child
+bank inherits the record without recomputing the budget. The previous entry retains
+its actual stored epoch; do not assume it is `d-1` if the fork skips whole epochs.
 
 [SOL-EPO-0011] A validator **MUST** decode, update, and use the epoch inflation account
 at the address and with the byte layout above. A reward certificate for an epoch other
 than the stored current or previous epoch has no inflation state and **MUST NOT** credit
-rewards. In epoch `1072`, the account data **MUST** be the 49-byte state in the table.
+rewards. At an epoch boundary, it **MUST** retain the inherited current record as the
+previous record and store `(R_d,Q_d,d)` as the new current record. Within that epoch,
+it **MUST NOT** replace the boundary budget with a recalculation using a later bank's
+capitalization.
 
 Mainnet full inflation has the following binary64 inputs. Foundation inflation is
 disabled, so the validator rate equals the total rate.
@@ -243,9 +255,10 @@ For elapsed inflation time `t` in years, the annual rate is:
 **Normative algorithm.**
 
 ```text
-tapered(t)  = i * pow(1-a, t)
-total(t)    = max(z, tapered(t))
-foundation(t) = 0
+base          = round_binary64(1.0 - a)
+tapered(t)    = round_binary64(i * pow(base, t))
+total(t)      = max(z, tapered(t))
+foundation(t) = 0.0
 validator(t)  = total(t)
 ```
 
@@ -272,61 +285,73 @@ regime. The transition applies at the first slot of the listed effective epoch:
 | `[447,984,000,454,896,000)` | `1037` | `250,000,000` ns | `126,227,703.974` |
 | `[454,896,000,...)` | `1053` | `200,000,000` ns | `157,784,629.968` |
 
-For current epoch `d`, let `t_d` be the sum of `(slots in regime)/(regime slots/year)`
-from inflation origin through `first(d)`. Its epoch duration uses the slots/year value
-active at `first(d)`:
+For the bank's actual epoch `d`, let `t_d` be the sum of
+`(slots in regime)/(regime slots/year)` from inflation origin through `first(d)`.
+Its epoch duration uses the slots/year value active at `first(d)`. The final regime
+has no fixed end slot; it continues until a protocol change selects another regime.
+The following calculation therefore applies without editing constants when an ordinary
+epoch boundary is crossed.
 
 **Normative algorithm.**
 
 ```text
-t_d      = sum_regimes(64,368,000, first(d))
-period_d = slots(d) / slots_per_year_at(first(d))
+t_d = binary64(0)
+for each regime [start,end) with slots/year Y, in increasing start order:
+    lo = max(start, inflation_origin)
+    hi = min(end, first(d))           // end is unbounded for the final regime
+    if hi > lo:
+        years = round_binary64(binary64(hi - lo) / Y)
+        t_d   = round_binary64(t_d + years)
+
+period_d = round_binary64(binary64(slots(d)) / slots_per_year_at(first(d)))
+rate_d   = validator(t_d)
 ```
 
-The only reward boundary in this specification has these exact binary64 results. The bit
-pattern column is the `u64` interpretation of the IEEE-754 binary64 encoding.
+Each curve parameter and slots/year literal denotes its binary64 value, rounded to
+nearest with ties to even. Convert each nonempty interval's integer slot count to
+binary64, round its division separately, then round the addition to the running sum.
+Do not sum exact rational durations and round only once. `pow(base,t_d)` uses
+binary64 inputs and returns binary64 before multiplication by `i`.
 
-**Normative table.**
+At the boundary entering epoch `d`, let `C` be the parent bank's capitalization in
+lamports, captured before epoch-boundary processing. Let `A` be the additional
+capitalization planned by reward preparation: commission lamports credited to
+non-incinerator collectors at the boundary plus the total planned stake-reward
+lamports for partitioned distribution. Exclude commissions sent to the incinerator
+or burned after failed collector validation. This includes rewards already credited
+by boundary processing as well as pending stake partitions; it is not just the
+unpaid remainder or the preceding epoch's nominal inflation budget.
 
-| Quantity | Decimal rendering | Binary64 bits |
-|---|---:|---:|
-| current slots/year | `157784629.96799999475479126` | `0x41a2cf346bef9db2` |
-| `t_1072` | `4.94877099346360882` | `0x4013cb8a9f91474d` |
-| `pow(0.85,t_1072)` | `0.44741488333907337` | `0x3fdca27208ebd6a3` |
-| `validator(t_1072)` | `0.03579319066712587` | `0x3fa2537c2eab6aa6` |
-| `period_1072` | `0.00273790926332694` | `0x3f666dcfd7da5ad5` |
-| `validator(t_1072) * period_1072` | `0.00009799850829155` | `0x3f19b0918d7c2c6d` |
-
-At the epoch boundary, let `C` be capitalization before the new reward budget and let
-`A` be the partitioned rewards from the preceding epoch that are committed but not yet
-credited. Convert `C+A` to binary64 using round-to-nearest, ties-to-even. The current
-epoch's maximum validator-reward budget `R` is calculated in this exact operation order:
+Form the integer sum `C+A` before converting it to binary64. The epoch's maximum
+validator-reward budget is calculated in this exact operation order:
 
 **Normative algorithm.**
 
 ```text
 x0 = binary64(C + A)
-x1 = round_binary64(0x3fa2537c2eab6aa6 * x0)
-x2 = round_binary64(x1 * 0x3f666dcfd7da5ad5)
-R  = trunc_u64(x2)
+x1 = round_binary64(rate_d * x0)
+x2 = round_binary64(x1 * period_d)
+R_d = trunc_u64(x2)
 ```
 
-The hexadecimal operands in this pseudocode denote binary64 bit patterns, not integer
-multiplication. Each multiplication rounds separately; reassociation to
-`C * (rate * period)` or contraction into a fused operation is not equivalent because
-`C` normally exceeds `2^53` lamports.
+Each multiplication rounds separately; reassociation to
+`binary64(C+A) * (rate_d * period_d)` or contraction into a fused operation is not
+equivalent. Nor may `binary64(C) + binary64(A)` replace conversion of the integer sum,
+because capitalization normally exceeds `2^53` lamports. `R_d`, `rate_d`, and `t_d`
+are derived state and change as epochs advance; they are not specification constants.
 
-[SOL-EPO-0012] The annual Mainnet inflation rate **MUST** be
-`max(0.015, 0.08 * pow(0.85,t))`, with zero foundation allocation and the elapsed-time
-origin at slot `64,368,000`. Elapsed time **MUST** use every historical slot-time regime
-in the table. At epoch `1072`, the elapsed time, annual rate, and duration **MUST** have
-the exact binary64 bit patterns above.
+[SOL-EPO-0012] The annual Mainnet inflation rate **MUST** use the curve and binary64
+inputs above, with zero foundation allocation. Elapsed time **MUST** use the stated
+inflation origin and every historical slot-time regime in the table, truncated at the
+first slot of the bank's actual epoch as above. The reference epoch `E` **MUST NOT**
+be substituted for that runtime epoch.
 
-[SOL-EPO-0013] The epoch-1072 reward budget **MUST** be computed from `C+A` using the
-`x0`, `x1`, `x2`, `R` sequence above. Binary64 operations
+[SOL-EPO-0013] Each epoch's reward budget `R_d` **MUST** be computed from its boundary
+inputs `C+A`, its annual rate `rate_d`, and its duration `period_d` using the
+`x0`, `x1`, `x2`, `R_d` sequence above. Binary64 operations
 **MUST** use round-to-nearest, ties-to-even; conversion to `u64` **MUST** truncate
 toward zero; and reassociation, extended precision, or fused substitution **MUST NOT**
-change `R`.
+change `R_d`.
 
 ### 16.6.3 Per-slot reward certificates and vote credits
 

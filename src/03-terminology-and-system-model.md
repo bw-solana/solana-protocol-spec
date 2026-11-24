@@ -17,7 +17,7 @@
 | feature | An on-chain Feature Gate account whose decoded activation state selects a protocol rule. |
 | finalized | The commitment/finality condition defined by Chapter 15, not an RPC label by itself. |
 | fork | A parent-linked sequence of slot states sharing an ancestor. |
-| reference epoch `E` | Mainnet epoch 1072, whose feature state determines this specification's protocol configuration. |
+| reference epoch `E` | Mainnet epoch declared at the beginning of this specification, whose feature state identifies the specified protocol configuration; not a runtime epoch input. |
 | root | A locally persisted/pruned consensus anchor advanced only by the active consensus rules. |
 | shred | A signed data or coding unit used to disseminate and reconstruct slot payload. |
 | slot | A `u64` position in the ledger schedule. A skipped slot has no accepted block. |

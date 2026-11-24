@@ -125,7 +125,7 @@ Cost units used for block admission are not just execution compute units. Let:
 | loaded-data page size | `32,768` | bytes | started-page rounding |
 | loaded-data page charge | `8` | cost units/page | `8*ceil(L/32768)`, zero when `L=0` |
 | execution term | `X` | cost units | actual consumed CU in the committed transaction result |
-| loaded-data term input | `L` | bytes | actual metered loaded-account bytes in the committed transaction result |
+| loaded-data term input | `L` | bytes | Section 7.7.1 metered bytes in the committed result, including eligible implicit ProgramData size floors |
 | maximum one transaction request | `1,400,000` | compute units | Section 7.6 cap; not itself the total cost |
 | static allocation per account | `10,485,760` | bytes | a larger recognized request makes the transaction's static allocation estimate zero |
 | static allocation per transaction | `20,971,520` | bytes | clamp after summing recognized top-level System requests |

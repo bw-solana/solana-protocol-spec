@@ -3,8 +3,10 @@
 This table gathers the limits most likely to be confused across protocol domains. It
 includes every per-slot/block production limit and every shred/FEC limit. Intrinsic
 integer ranges and exact field lengths already visible in a byte-layout table are not
-repeated here. CRDS retention, QUIC resource, and Turbine topology rows summarize the
-informative active liveness profile; they are not block-validity limits.
+repeated here. Implementation-specific admission, flow-control, timeout, certificate
+construction, and gossip-policy values are defined separately in Chapter 19 rather
+than presented as Mainnet-wide constants. The Turbine topology rows describe delivery
+requirements, not block-validity limits.
 
 **Informative table.**
 
@@ -21,26 +23,13 @@ informative active liveness profile; they are not block-validity limits.
 | gossip | EpochSlots / DuplicateShred index | `<255` / `<512` | 6.3 |
 | gossip | DuplicateShred proof-consumer assembly | `1..=3` chunks | 6.3 |
 | gossip | bounded slot or wallclock field | `< 10^15` | 6.3–6.5 |
-| gossip | push/contact wallclock window | `±15,000` milliseconds | 6.2 |
-| gossip | pull caller window / random future jitter | `[-15,000,+15,000)` / `0..3,750` milliseconds | 6.2 |
-| gossip | default origin timeout / rejected-hash retention | `15,000` / `20,000` milliseconds | 6.2 |
-| gossip | prune wallclock window | `±500` milliseconds | 6.2 |
 | gossip | slots in one `CompressedSlots` value | `< 16,384` | 6.3 |
 | gossip | incremental snapshot hashes | `25` | 6.3 |
 | gossip | pruned keys in one Prune message | `32` | 6.4 |
-| gossip push | peers per bucket / sends per value / stake buckets | `12` / `9` / `25` | 6.3.1 |
 | QUIC/TLS | TLS version / ALPN | TLS `1.3` / `solana-tpu` | 6.6 |
-| QUIC/TLS | generated certificate length / public-key bytes | `249` / `32` bytes | 6.6 |
-| TPU QUIC | one transaction stream / connection receive window | `1..=4,096` (TPU, TPU-forward) or `1..=1,232` (TPU-vote) / `8,388,608` bytes | 6.6 |
-| QUIC | inbound unidirectional streams after stake/RTT scaling | unstaked `128..=896`; staked `128..=3,584` | 6.6 |
-| QUIC | idle / handshake / incomplete-stream timeout | `30` / `2` / `2` seconds | 6.6 |
-| QUIC | admitted connections | `2,000` staked plus `2,000` unstaked | 6.6 |
-| QUIC | per-identity/IP admission | `16` per staked identity; `8` per unstaked IP; `8` new per IP per minute with burst `80` | 6.6 |
-| QUIC | aggregate connection rate / burst | `2,500` connections per second / `1,000` | 6.6 |
-| QUIC | stream-arrival throttle | `500` streams per millisecond | 6.6 |
-| QUIC | application close codes | `1`, `2`, `4`, `5` | 6.6 |
-| Alpenglow QUIC | ALPN / path MTU / idle timeout | `alpenglow-v1` / `1,280` bytes / `5` seconds | 6.6.1 |
-| Alpenglow QUIC | carriage / streams / inbound connections per peer | DATAGRAM only / `0` / `2` | 6.6.1 |
+| TPU QUIC | one transaction's application-message length | `1..=4,096` (TPU, TPU-forward) or `1..=1,232` (TPU-vote) bytes | 6.6 |
+| TLS identity | Ed25519 SubjectPublicKeyInfo / public-key lengths | `44` / `32` bytes | 6.6 |
+| Alpenglow QUIC | ALPN / application carriage | `alpenglow-v1` / DATAGRAM only | 6.6.1 |
 | repair | signed-request timestamp distance | `600,000` ms | 6.7 |
 | repair | Orphan responses / AncestorHashes pairs | `11` / `30` | 6.7 |
 | Turbine | fanout / maximum hops in epoch `E` | `200` / `4` | 6.8 |
@@ -58,6 +47,7 @@ informative active liveness profile; they are not block-validity limits.
 | fees | signature fee rate | `5,000` lamports per signature | 7.6 |
 | account loading | loaded account data per transaction | `67,108,864` bytes | 7.6–7.7 |
 | account loading | ordinary account overhead / ALT descriptor | `64` / `8,248` bytes | 7.7.1 |
+| account loading | implicit Loader-v3 ProgramData data floor / minimum total charge | `45` / `109` bytes, including absent and zero-lamport implicit accounts | 7.7.1 |
 | PoH / block | hashes per tick / bank tick-height interval / serialized tick Entries | absent / `64` / `1` | 8.4 |
 | PoH / block | Entry `num_hashes` / target slot duration | `1` / `200,000,000` nanoseconds | 8.4, 16.1 |
 | shred FEC | data / coding shreds per set | `32` / `32` | 9.1 |
@@ -105,10 +95,27 @@ informative active liveness profile; they are not block-validity limits.
 | epoch | target slot duration / slots per year | `200,000,000` nanoseconds / `157,784,629.968` slots | 16.1, 16.6.2 |
 | epoch | normal slots / consecutive leader slots | `432,000` / `4` | 16.1, 16.3 |
 | inflation | initial / terminal rate / taper | `8%` / `1.5%` / `15%` | 16.6.2 |
-| inflation | state address / epoch-`E` data length | `3vJzniWALu2qGFJ1ZY6JD3Y2ZmA5zWqmVdDX7yBXHgu7` / `49` bytes | 16.6.2 |
-| inflation | epoch-1072 / epoch-1071 reward budget | `62,395,745,304,053` / `62,417,544,028,268` lamports | 16.6.2 |
+| inflation | state address / data length with a previous record | `3vJzniWALu2qGFJ1ZY6JD3Y2ZmA5zWqmVdDX7yBXHgu7` / `49` bytes | 16.6.2 |
 | rewards | admitted vote accounts | `2,000` | 16.6.1 |
 | rewards | stake updates per produced block | `2,048` accounts | 16.6.5 |
 | rewards | maximum distribution span | `43,200` produced blocks | 16.6.5 |
 | feature state | minimum Feature-account data | `9` bytes | 17.1 |
 | hard-fork state | registered Mainnet hard forks at `E` | `9` registrations | 17.5 |
+
+## Implementation-specific parameter index
+
+These links locate sender-facing implementation details without duplicating their
+values in the protocol-constant table above.
+
+**Informative table.**
+
+| Implementation-specific subject | Authoritative profile |
+|---|---|
+| TPU receive windows, connection admission, timeouts, and TLS crypto choices | [Agave TPU transport](19-implementation-specific-interoperability-profiles.md#1921-transport-and-admission) |
+| TPU stream-arrival quotas, load thresholds, and EMA | [Agave arrival quotas](19-implementation-specific-interoperability-profiles.md#1922-arrival-quotas-and-load-estimation) |
+| Stake-and-RTT concurrent-stream allocation | [Agave stream allocation](19-implementation-specific-interoperability-profiles.md#1923-concurrent-stream-calculation) |
+| Dummy-certificate bytes and SNI construction | [Agave certificate construction](19-implementation-specific-interoperability-profiles.md#1924-certificate-construction) |
+| TPU application close codes | [Agave close codes](19-implementation-specific-interoperability-profiles.md#1925-application-close-codes) |
+| TPU connection/reassembly resources and advertised QUIC credit | [Firedancer TPU transport](19-implementation-specific-interoperability-profiles.md#193-firedancer-tpu-interoperability-profile) |
+| Gossip freshness, retention, pull selection, and push active set | [Agave gossip](19-implementation-specific-interoperability-profiles.md#194-agave-gossip-policy) |
+| Alpenglow MTU, connection counts, timeouts, and keepalive | [Agave Alpenglow tuning](19-implementation-specific-interoperability-profiles.md#195-agave-alpenglow-transport-tuning) |

@@ -20,6 +20,7 @@
 - [16. Epochs, leader schedule, stake, fees, and rewards](16-epochs-leader-schedule-stake-fees-and-rewards.md)
 - [17. Feature activation, versioning, and hard forks](17-feature-activation-versioning-and-hard-forks.md)
 - [18. Security and adversarial considerations](18-security-and-adversarial-considerations.md)
+- [19. Implementation-specific interoperability profiles](19-implementation-specific-interoperability-profiles.md)
 
 # Appendices
 

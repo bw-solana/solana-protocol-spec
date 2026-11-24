@@ -15,14 +15,23 @@ identify how the epoch-`E` configuration was selected; they do not re-enable his
 behavior. A later Mainnet activation requires a revised specification whose affected
 normative sections describe the new behavior directly.
 
-The specification applies to banks whose derived epoch is `E`. If the trusted starting
-root is the last bank before `E`, child-bank construction applies the epoch-`E` boundary
-transition exactly once before that child's transactions. If the trusted starting state
-is already within `E`, that state already includes the boundary transition and it must
-not be applied again. This specification does not define the first bank of `E+1`.
+The reference epoch identifies the protocol configuration, not a single-epoch validity
+window. These rules continue to apply in later epochs while that configuration remains
+unchanged. The bank's actual slot and epoch drive schedules, epoch-boundary processing,
+inflation, and other changing state; `E` is not substituted for those inputs. Child-bank
+construction applies boundary processing once when its epoch exceeds its parent's;
+restoring an in-epoch trusted state does not repeat that transition.
+
+If Mainnet advances to another epoch without a protocol change, updating the reference
+epoch in the specification header is sufficient. Codec names, requirement identifiers,
+formulas, and immutable activation records do not change just because the reference
+epoch changes. A protocol change requires corresponding revisions to the affected rules.
 
 This specification does not standardize process architecture, stages, channels,
 databases, caches, thread scheduling, host execution strategy, or operator interfaces.
+Chapter 19 documents implementation-specific interoperability profiles for transaction
+senders and validator peers. Those profiles describe receiver behavior without requiring
+validator implementations to use matching admission or resource-management policies.
 
 ## 1.2 Conformance roles
 
@@ -44,8 +53,9 @@ applicable to each component.
 When this specification gives an exact byte representation, `SOL-CNF-0002` emits that
 canonical representation and `SOL-CNF-0001` applies the specified accepted domain.
 Chapter 6 requirements define minimum codec, authentication, and peer-interaction
-interoperability. Its explicitly informative active-liveness profiles document deployed
-operating parameters but are not additional conformance roles.
+interoperability. Chapter 19 is informative: its implementation-specific defaults,
+algorithms, and limits are not additional validator conformance requirements or minimum
+service guarantees.
 
 ## 1.3 Explicit exclusions
 
@@ -56,3 +66,5 @@ transaction-selection policy, and arbitrary application-program semantics are ou
 scope except when a specific rule demonstrably changes protocol interoperability,
 validity, deterministic state, a consensus commitment, voting, consensus selection,
 finality, or necessary liveness.
+Implementation-specific behavior useful to communicating peers is documented separately
+in Chapter 19, without standardizing the implementation's internal architecture.

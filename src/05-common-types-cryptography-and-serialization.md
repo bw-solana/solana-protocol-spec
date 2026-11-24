@@ -42,6 +42,10 @@ machines, erasure-code mathematics, cryptographic preimage recipes, and raw fixe
 keys, signatures, or hashes are not separate codecs just because their algorithms
 consume bytes. Their enclosing section remains authoritative.
 
+Codec identifiers are stable names, independent of the specification's reference epoch.
+They are not transmitted version fields. Actual wire-version tags and accepted layouts
+are defined by the controlling sections and change only with the protocol they describe.
+
 **Normative table. Codec registry.**
 
 | Codec | Surfaces | Controlling rules |
@@ -49,18 +53,18 @@ consume bytes. Their enclosing section remains authoritative.
 | `FIXINT-LE` | Primitive fields and containers in an enclosing codec that explicitly selects canonical fixed-integer serialization | This section's primitive table plus the enclosing field table. Counts are `u64`; enum tags are `u32`; no padding is implicit. |
 | `SHORT-U16` | Transaction counts, instruction counts and explicitly named compact sequences | Section 5.4 only. |
 | `ULEB128` | ContactInfo version, wallclock, and other explicitly named unsigned compact fields wider than `ShortU16` | Section 5.4. The declared integer width bounds the group count; overflow and nonminimal final zero groups are rejected. |
-| `CRDS-E1072` | Gossip datagrams, `CrdsValue`, ContactInfo and nested CRDS types | Sections 6.2–6.5. This is a closed schema composing `FIXINT-LE`, `SHORT-U16`, and `ULEB128`; zero-byte deprecated variants and field-specific bounds are exactly as stated there. |
-| `REPAIR-E1072` | Repair requests, ordinary shred responses, repair ping challenges, ancestor-hash responses, and block-ID repair | Section 6.7. Requests and specialized responses use their stated discriminants and fields; an ordinary response is one `SHRED-E1072` followed by a `u32` nonce. |
-| `ALPENGLOW-WIRE-E1072` | Alpenglow votes and certificates carried in QUIC datagrams | Sections 6.6 and 15.2. The codec is the exact Wincode subset stated there, including explicit enum tags and length encodings. |
-| `ALPENGLOW-STATE-E1072` | Epoch inflation account state used by Alpenglow vote rewards | Section 16.6.2. This is the exact fixed-integer Wincode record stated there, including the one-byte previous-state option tag. |
-| `TX-E1072` | Legacy, version-0, and version-1 transactions and messages | Sections 7.1–7.4. Legacy and v0 compose `SHORT-U16`; v1 uses its bespoke fixed-count layout and places signatures after the message. |
-| `ENTRY-E1072` | Deshredded ledger components, Alpenglow block markers, and Entries | Sections 8.3 and 9.6. |
-| `SHRED-E1072` | Raw Turbine shreds and shreds embedded in repair responses | Sections 9.1–9.5 and 14.6. This is a fixed-offset, variant-dependent format with exact lengths, padding, Merkle coverage, and Reed–Solomon regions; it is not a general-purpose struct serialization. |
-| `SBF-ELF-E1072` | Deployed SBF ELF objects and their eight-byte instruction words | Sections 12.8.1, 12.8.3, and 12.8.5. ELF acceptance and instruction decoding depend on the selected active SBF version. |
-| `SBF-ABI-E1072` | Loader ABI-v0 and ABI-v1 program inputs and outputs, plus syscall guest-memory structures | Sections 12.8.6–12.8.7. The loader selects v0 or v1; syscall structures use their exact field order, widths, padding, alignment, and access rules. |
-| `PRECOMPILE-E1072` | Ed25519, secp256k1, and secp256r1 signature-verification instruction data | Section 12.6. Prefixes, offset records, referenced byte ranges, and program-specific key and signature encodings are exact. |
-| `PROGRAM-E1072` | Compute Budget, System, Vote, Stake, Config, Feature, ALT, loader, and ZK ElGamal instructions and account states | Sections 7.6, 13.3, and 17.1. Each program's byte tables control; `FIXINT-LE` applies only where explicitly selected, and bespoke one-byte and POD layouts remain bespoke. |
-| `SYSVAR-E1072` | Persistent sysvar account data and the synthesized Instructions sysvar | Sections 13.4 and 13.6. Persistent sysvars compose `FIXINT-LE` where stated; the Instructions sysvar uses its own `u16`-offset framing. |
+| `CRDS` | Gossip datagrams, `CrdsValue`, ContactInfo and nested CRDS types | Sections 6.2–6.5. This is a closed schema composing `FIXINT-LE`, `SHORT-U16`, and `ULEB128`; zero-byte deprecated variants and field-specific bounds are exactly as stated there. |
+| `REPAIR` | Repair requests, ordinary shred responses, repair ping challenges, ancestor-hash responses, and block-ID repair | Section 6.7. Requests and specialized responses use their stated discriminants and fields; an ordinary response is one `SHRED` followed by a `u32` nonce. |
+| `ALPENGLOW-WIRE` | Alpenglow votes and certificates carried in QUIC datagrams | Sections 6.6 and 15.2. The codec is the exact Wincode subset stated there, including explicit enum tags and length encodings. |
+| `ALPENGLOW-STATE` | Epoch inflation account state used by Alpenglow vote rewards | Section 16.6.2. This is the exact fixed-integer Wincode record stated there, including the one-byte previous-state option tag. |
+| `TX` | Legacy, version-0, and version-1 transactions and messages | Sections 7.1–7.4. Legacy and v0 compose `SHORT-U16`; v1 uses its bespoke fixed-count layout and places signatures after the message. |
+| `ENTRY` | Deshredded ledger components, Alpenglow block markers, and Entries | Sections 8.3 and 9.6. |
+| `SHRED` | Raw Turbine shreds and shreds embedded in repair responses | Sections 9.1–9.5 and 14.6. This is a fixed-offset, variant-dependent format with exact lengths, padding, Merkle coverage, and Reed–Solomon regions; it is not a general-purpose struct serialization. |
+| `SBF-ELF` | Deployed SBF ELF objects and their eight-byte instruction words | Sections 12.8.1, 12.8.3, and 12.8.5. ELF acceptance and instruction decoding depend on the selected active SBF version. |
+| `SBF-ABI` | Loader ABI-v0 and ABI-v1 program inputs and outputs, plus syscall guest-memory structures | Sections 12.8.6–12.8.7. The loader selects v0 or v1; syscall structures use their exact field order, widths, padding, alignment, and access rules. |
+| `PRECOMPILE` | Ed25519, secp256k1, and secp256r1 signature-verification instruction data | Section 12.6. Prefixes, offset records, referenced byte ranges, and program-specific key and signature encodings are exact. |
+| `PROGRAM` | Compute Budget, System, Vote, Stake, Config, Feature, ALT, loader, and ZK ElGamal instructions and account states | Sections 7.6, 13.3, and 17.1. Each program's byte tables control; `FIXINT-LE` applies only where explicitly selected, and bespoke one-byte and POD layouts remain bespoke. |
+| `SYSVAR` | Persistent sysvar account data and the synthesized Instructions sysvar | Sections 13.4 and 13.6. Persistent sysvars compose `FIXINT-LE` where stated; the Instructions sysvar uses its own `u16`-offset framing. |
 
 [SOL-GEN-0006] A protocol object belonging to a registered surface **MUST** be encoded
 with the assigned enclosing codec and every nested codec it names. A receiver

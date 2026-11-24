@@ -183,13 +183,19 @@ protocol key is `(recent_blockhash, message_hash)`, where `message_hash` is Sect
 its database representation, truncated index keys, and lookup acceleration are outside
 scope.
 
-[SOL-STA-0019] Each `P1`, `P2`, or successful processed transaction **MUST** add its
-`(recent_blockhash, message_hash)` to the child fork's replay-protection relation, with
-the transaction outcome needed by descendants. No signature value is a second
-protocol replay key.
+[SOL-STA-0019] Each `P1`, `P2`, or successful processed ordinary blockhash transaction
+**MUST** add its `(recent_blockhash, message_hash)` to the child fork's replay-protection
+relation, with the transaction outcome needed by descendants. No signature value is a
+second protocol replay key.
 
-[SOL-STA-0020] A processed durable-nonce transaction **MUST** additionally obtain replay
-protection from the committed nonce advancement specified in Section 11.4.
+[SOL-STA-0020] A processed durable-nonce transaction **MUST** obtain replay protection
+from the committed nonce advancement specified in Section 11.4 and **MUST NOT** add
+its message hash to the recent-blockhash replay-protection relation. This applies to
+successful execution, `P1`, and `P2` alike. Storing a transaction signature or result
+for status queries is optional local metadata and **MUST NOT** create an additional
+consensus replay check. Classification follows phase 6: a message accepted by the
+ordinary recent-blockhash check is not excluded just because it contains an AdvanceNonce
+instruction.
 
 [SOL-STA-0021] The slot's processed-signature counter **MUST** add
 `required_signature_count` for every processed transaction, whether execution succeeds,

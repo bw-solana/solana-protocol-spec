@@ -7,7 +7,7 @@ through the [Solana validator-governance site](https://governance.solana.com/). 
 appendix lists every feature account active in the Mainnet configuration at reference
 epoch `E`; features not active by `E` are outside this specification.
 
-**Informative table. Complete active Mainnet feature manifest at `E = 1072`.**
+**Informative table. Complete active Mainnet feature manifest at reference epoch `E`.**
 
 | Feature address | Protocol selector | Activation epoch | Brief effect | Relevant SIMD | Classification |
 |---|---|---:|---|---|---|
@@ -322,6 +322,7 @@ epoch `E`; features not active by `E` are outside this specification.
 | `iBRLMc81UjRa8fn8A6eE8bJTnRbgQoPTynM51akENCV` | `reduce_slot_time_to_250ms` | `1036` | Select the 250-ms slot profile from epoch 1037. | [SIMD-0525](https://github.com/solana-foundation/solana-improvement-documents/blob/4f80d8a6938f86b9394e792253a2a52e01346314/proposals/0525-reduce-slot-times.md) | Consensus/state |
 | `iBRLjhJnkmDZgNoZRDMW11d8ZV7HvsL3vAyRjZB5npW` | `reduce_slot_time_to_200ms` | `1052` | Select the current 200-ms slot profile from epoch 1053. | [SIMD-0525](https://github.com/solana-foundation/solana-improvement-documents/blob/4f80d8a6938f86b9394e792253a2a52e01346314/proposals/0525-reduce-slot-times.md) | Consensus/state |
 | `A1pengvuM6JEcyNuTnMqepBKhwHE3N6PmUrdATGawhJS` | `alpenglow` | `1064` | Enable Alpenglow block markers, votes, certificates, rewards, and finality. | [SIMD-0326](https://github.com/solana-foundation/solana-improvement-documents/blob/4f80d8a6938f86b9394e792253a2a52e01346314/proposals/0326-alpenglow.md) | Consensus/state |
+| `8whkDenELnfwYLirBc4Wb4H2Z1z5K7tiykpdxJS7cWg1` | `loaderv3_programdata_size_floor` | `1079` | Charge at least 45 data bytes plus loading overhead for each eligible implicit ProgramData address, including absent accounts; Section 7.7.1. | — | Consensus/state |
 
 [SOL-FTR-0011] Every Appendix C address **MUST** be treated as active from its stated
 activation epoch when decoding Feature state. A `Consensus/state` or
